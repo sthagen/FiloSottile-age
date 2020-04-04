@@ -60,6 +60,9 @@ func (r *Recipient) Marshal(w io.Writer) error {
 	if _, err := io.WriteString(w, "\n"); err != nil {
 		return err
 	}
+	if len(r.Body) == 0 {
+		return nil
+	}
 	ww := base64.NewEncoder(b64, &newlineWriter{dst: w})
 	if _, err := ww.Write(r.Body); err != nil {
 		return err
@@ -148,6 +151,11 @@ func Parse(input io.Reader) (*Header, io.Reader, error) {
 			if prefix != string(recipientPrefix) || len(args) < 1 {
 				return nil, nil, errorf("malformed recipient: %q", line)
 			}
+			for _, a := range args {
+				if !isValidString(a) {
+					return nil, nil, errorf("malformed recipient: %q", line)
+				}
+			}
 			r.Type = args[0]
 			r.Args = args[1:]
 			h.Recipients = append(h.Recipients, r)
@@ -159,6 +167,9 @@ func Parse(input io.Reader) (*Header, io.Reader, error) {
 			}
 			if len(b) > bytesPerLine {
 				return nil, nil, errorf("malformed body line %q: too long", line)
+			}
+			if len(b) == 0 {
+				return nil, nil, errorf("malformed body line %q: line is empty", line)
 			}
 			r.Body = append(r.Body, b...)
 			if len(b) < bytesPerLine {
@@ -185,4 +196,16 @@ func splitArgs(line []byte) (string, []string) {
 	l := strings.TrimSuffix(string(line), "\n")
 	parts := strings.Split(l, " ")
 	return parts[0], parts[1:]
+}
+
+func isValidString(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, c := range s {
+		if c < 33 || c > 126 {
+			return false
+		}
+	}
+	return true
 }
