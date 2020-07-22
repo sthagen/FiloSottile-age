@@ -18,11 +18,13 @@ import (
 )
 
 type Header struct {
-	Recipients []*Recipient
+	Recipients []*Stanza
 	MAC        []byte
 }
 
-type Recipient struct {
+// Stanza is assignable to age.Stanza, and if this package is made public,
+// age.Stanza can be made a type alias of this type.
+type Stanza struct {
 	Type string
 	Args []string
 	Body []byte
@@ -40,15 +42,50 @@ func DecodeString(s string) ([]byte, error) {
 
 var EncodeToString = b64.EncodeToString
 
-const columnsPerLine = 64
-const bytesPerLine = columnsPerLine / 4 * 3
+const ColumnsPerLine = 64
+const BytesPerLine = ColumnsPerLine / 4 * 3
+
+// NewlineWriter returns a Writer that writes to dst, inserting an LF character
+// every ColumnsPerLine bytes. It does not insert a newline neither at the
+// beginning nor at the end of the stream.
+func NewlineWriter(dst io.Writer) io.Writer {
+	return &newlineWriter{dst: dst}
+}
+
+type newlineWriter struct {
+	dst     io.Writer
+	written int
+}
+
+func (w *newlineWriter) Write(p []byte) (n int, err error) {
+	for len(p) > 0 {
+		remainingInLine := ColumnsPerLine - (w.written % ColumnsPerLine)
+		if remainingInLine == ColumnsPerLine && w.written != 0 {
+			if _, err := w.dst.Write([]byte("\n")); err != nil {
+				return n, err
+			}
+		}
+		toWrite := remainingInLine
+		if toWrite > len(p) {
+			toWrite = len(p)
+		}
+		nn, err := w.dst.Write(p[:toWrite])
+		n += nn
+		w.written += nn
+		p = p[nn:]
+		if err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
 
 const intro = "age-encryption.org/v1\n"
 
 var recipientPrefix = []byte("->")
 var footerPrefix = []byte("---")
 
-func (r *Recipient) Marshal(w io.Writer) error {
+func (r *Stanza) Marshal(w io.Writer) error {
 	if _, err := w.Write(recipientPrefix); err != nil {
 		return err
 	}
@@ -63,7 +100,7 @@ func (r *Recipient) Marshal(w io.Writer) error {
 	if len(r.Body) == 0 {
 		return nil
 	}
-	ww := base64.NewEncoder(b64, &newlineWriter{dst: w})
+	ww := base64.NewEncoder(b64, NewlineWriter(w))
 	if _, err := ww.Write(r.Body); err != nil {
 		return err
 	}
@@ -112,13 +149,6 @@ func Parse(input io.Reader) (*Header, io.Reader, error) {
 	h := &Header{}
 	rr := bufio.NewReader(input)
 
-	// TODO: find a way to communicate to the caller that the file was armored,
-	// as they might not appreciate the malleability.
-	if start, _ := rr.Peek(len(armorPreamble)); string(start) == armorPreamble {
-		input = ArmoredReader(rr)
-		rr = bufio.NewReader(input)
-	}
-
 	line, err := rr.ReadString('\n')
 	if err != nil {
 		return nil, nil, errorf("failed to read intro: %v", err)
@@ -127,7 +157,7 @@ func Parse(input io.Reader) (*Header, io.Reader, error) {
 		return nil, nil, errorf("unexpected intro: %q", line)
 	}
 
-	var r *Recipient
+	var r *Stanza
 	for {
 		line, err := rr.ReadBytes('\n')
 		if err != nil {
@@ -146,7 +176,7 @@ func Parse(input io.Reader) (*Header, io.Reader, error) {
 			break
 
 		} else if bytes.HasPrefix(line, recipientPrefix) {
-			r = &Recipient{}
+			r = &Stanza{}
 			prefix, args := splitArgs(line)
 			if prefix != string(recipientPrefix) || len(args) < 1 {
 				return nil, nil, errorf("malformed recipient: %q", line)
@@ -165,14 +195,14 @@ func Parse(input io.Reader) (*Header, io.Reader, error) {
 			if err != nil {
 				return nil, nil, errorf("malformed body line %q: %v", line, err)
 			}
-			if len(b) > bytesPerLine {
+			if len(b) > BytesPerLine {
 				return nil, nil, errorf("malformed body line %q: too long", line)
 			}
 			if len(b) == 0 {
 				return nil, nil, errorf("malformed body line %q: line is empty", line)
 			}
 			r.Body = append(r.Body, b...)
-			if len(b) < bytesPerLine {
+			if len(b) < BytesPerLine {
 				// Only the last line of a body can be short.
 				r = nil
 			}
@@ -182,13 +212,18 @@ func Parse(input io.Reader) (*Header, io.Reader, error) {
 		}
 	}
 
-	// Unwind the bufio overread and return the unbuffered input.
+	// If input is a bufio.Reader, rr might be equal to input because
+	// bufio.NewReader short-circuits. In this case we can just return it (and
+	// we would end up reading the buffer twice if we prepended the peek below).
+	if rr == input {
+		return h, rr, nil
+	}
+	// Otherwise, unwind the bufio overread and return the unbuffered input.
 	buf, err := rr.Peek(rr.Buffered())
 	if err != nil {
 		return nil, nil, errorf("internal error: %v", err)
 	}
 	payload := io.MultiReader(bytes.NewReader(buf), input)
-
 	return h, payload, nil
 }
 

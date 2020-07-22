@@ -7,6 +7,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"flag"
 	"fmt"
@@ -15,7 +16,8 @@ import (
 	"os"
 	"strings"
 
-	"filippo.io/age/internal/age"
+	"filippo.io/age"
+	"filippo.io/age/armor"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
@@ -129,13 +131,15 @@ func main() {
 		}
 		defer f.Close()
 		out = f
-	} else if terminal.IsTerminal(int(os.Stdout.Fd())) && !decryptFlag {
+	} else if terminal.IsTerminal(int(os.Stdout.Fd())) {
 		if armorFlag {
 			// If the output will go to a TTY, and it will be armored, buffer it
 			// up so it doesn't get in the way of typing the input.
 			buf := &bytes.Buffer{}
 			defer func() { io.Copy(os.Stdout, buf) }()
 			out = buf
+		} else if decryptFlag && name != "-" {
+			// TODO: buffer the output and check it's printable.
 		} else if name != "-" {
 			// If the output wouldn't be armored, refuse to send binary to the
 			// terminal unless explicitly requested with "-o -".
@@ -205,10 +209,16 @@ func encryptPass(pass string, in io.Reader, out io.Writer, armor bool) {
 	encrypt([]age.Recipient{r}, in, out, armor)
 }
 
-func encrypt(recipients []age.Recipient, in io.Reader, out io.Writer, armor bool) {
+func encrypt(recipients []age.Recipient, in io.Reader, out io.Writer, withArmor bool) {
 	ageEncrypt := age.Encrypt
-	if armor {
-		ageEncrypt = age.EncryptWithArmor
+	if withArmor {
+		a := armor.NewWriter(out)
+		defer func() {
+			if err := a.Close(); err != nil {
+				logFatalf("Error: %v", err)
+			}
+		}()
+		out = a
 	}
 	w, err := ageEncrypt(out, recipients...)
 	if err != nil {
@@ -237,6 +247,13 @@ func decrypt(keys []string, in io.Reader, out io.Writer) {
 			logFatalf("Error: %v", err)
 		}
 		identities = append(identities, ids...)
+	}
+
+	rr := bufio.NewReader(in)
+	if start, _ := rr.Peek(len(armor.Header)); string(start) == armor.Header {
+		in = armor.NewReader(rr)
+	} else {
+		in = rr
 	}
 
 	r, err := age.Decrypt(in, identities...)

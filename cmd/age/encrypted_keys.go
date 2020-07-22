@@ -7,89 +7,12 @@
 package main
 
 import (
-	"crypto/ed25519"
-	"crypto/rsa"
 	"fmt"
 	"os"
 
-	"filippo.io/age/internal/age"
-	"filippo.io/age/internal/format"
-	"golang.org/x/crypto/ssh"
+	"filippo.io/age"
 	"golang.org/x/crypto/ssh/terminal"
 )
-
-type EncryptedSSHIdentity struct {
-	pubKey     ssh.PublicKey
-	pemBytes   []byte
-	passphrase func() ([]byte, error)
-
-	decrypted age.Identity
-}
-
-func NewEncryptedSSHIdentity(pubKey ssh.PublicKey, pemBytes []byte, passphrase func() ([]byte, error)) (*EncryptedSSHIdentity, error) {
-	switch t := pubKey.Type(); t {
-	case "ssh-ed25519", "ssh-rsa":
-	default:
-		return nil, fmt.Errorf("unsupported SSH key type: %v", t)
-	}
-	return &EncryptedSSHIdentity{
-		pubKey:     pubKey,
-		pemBytes:   pemBytes,
-		passphrase: passphrase,
-	}, nil
-}
-
-var _ age.IdentityMatcher = &EncryptedSSHIdentity{}
-
-func (i *EncryptedSSHIdentity) Type() string {
-	return i.pubKey.Type()
-}
-
-func (i *EncryptedSSHIdentity) Unwrap(block *format.Recipient) (fileKey []byte, err error) {
-	if i.decrypted != nil {
-		return i.decrypted.Unwrap(block)
-	}
-
-	passphrase, err := i.passphrase()
-	if err != nil {
-		return nil, fmt.Errorf("failed to obtain passphrase: %v", err)
-	}
-	k, err := ssh.ParseRawPrivateKeyWithPassphrase(i.pemBytes, passphrase)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt SSH key file: %v", err)
-	}
-
-	switch k := k.(type) {
-	case *ed25519.PrivateKey:
-		i.decrypted, err = age.NewSSHEd25519Identity(*k)
-	case *rsa.PrivateKey:
-		i.decrypted, err = age.NewSSHRSAIdentity(k)
-	default:
-		return nil, fmt.Errorf("unexpected SSH key type: %T", k)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("invalid SSH key: %v", err)
-	}
-	if i.decrypted.Type() != i.pubKey.Type() {
-		return nil, fmt.Errorf("mismatched SSH key type: got %q, expected %q", i.decrypted.Type(), i.pubKey.Type())
-	}
-
-	return i.decrypted.Unwrap(block)
-}
-
-func (i *EncryptedSSHIdentity) Matches(block *format.Recipient) error {
-	if block.Type != i.Type() {
-		return age.ErrIncorrectIdentity
-	}
-	if len(block.Args) < 1 {
-		return fmt.Errorf("invalid %v recipient block", i.Type())
-	}
-
-	if block.Args[0] != age.SSHFingerprint(i.pubKey) {
-		return age.ErrIncorrectIdentity
-	}
-	return nil
-}
 
 type LazyScryptIdentity struct {
 	Passphrase func() (string, error)
@@ -101,7 +24,7 @@ func (i *LazyScryptIdentity) Type() string {
 	return "scrypt"
 }
 
-func (i *LazyScryptIdentity) Unwrap(block *format.Recipient) (fileKey []byte, err error) {
+func (i *LazyScryptIdentity) Unwrap(block *age.Stanza) (fileKey []byte, err error) {
 	pass, err := i.Passphrase()
 	if err != nil {
 		return nil, fmt.Errorf("could not read passphrase: %v", err)

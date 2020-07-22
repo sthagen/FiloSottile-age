@@ -4,7 +4,16 @@
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
 
-// Package age implements file encryption according to age-encryption.org/v1.
+// Package age implements file encryption according to the age-encryption.org/v1
+// specification.
+//
+// For most use cases, use the Encrypt and Decrypt functions with
+// X25519Recipient and X25519Identity. If passphrase encryption is required, use
+// ScryptRecipient and ScryptIdentity. For compatibility with existing SSH keys
+// use the filippo.io/age/agessh package.
+//
+// Age encrypted files are binary and not malleable, for encoding them as text,
+// use the filippo.io/age/armor package.
 package age
 
 import (
@@ -18,37 +27,51 @@ import (
 	"filippo.io/age/internal/stream"
 )
 
+// An Identity is a private key or other value that can decrypt an opaque file
+// key from a recipient stanza.
+//
+// Unwrap must return ErrIncorrectIdentity for recipient blocks that don't match
+// the identity, any other error might be considered fatal.
 type Identity interface {
 	Type() string
-	Unwrap(block *format.Recipient) (fileKey []byte, err error)
+	Unwrap(block *Stanza) (fileKey []byte, err error)
 }
 
+// IdentityMatcher can be optionally implemented by an Identity that can
+// communicate whether it can decrypt a recipient stanza without decrypting it.
+//
+// If an Identity implements IdentityMatcher, its Unwrap method will only be
+// invoked on blocks for which Match returned nil. Match must return
+// ErrIncorrectIdentity for recipient blocks that don't match the identity, any
+// other error might be considered fatal.
 type IdentityMatcher interface {
 	Identity
-	Matches(block *format.Recipient) error
+	Match(block *Stanza) error
 }
 
 var ErrIncorrectIdentity = errors.New("incorrect identity for recipient block")
 
+// A Recipient is a public key or other value that can encrypt an opaque file
+// key to a recipient stanza.
 type Recipient interface {
 	Type() string
-	Wrap(fileKey []byte) (*format.Recipient, error)
+	Wrap(fileKey []byte) (*Stanza, error)
 }
 
+// A Stanza is a section of the age header that encapsulates the file key as
+// encrypted to a specific recipient.
+type Stanza struct {
+	Type string
+	Args []string
+	Body []byte
+}
+
+// Encrypt returns a WriteCloser. Writes to the returned value are encrypted and
+// written to dst as an age file. Every recipient will be able to decrypt the file.
+//
+// The caller must call Close on the returned value when done for the last chunk
+// to be encrypted and flushed to dst.
 func Encrypt(dst io.Writer, recipients ...Recipient) (io.WriteCloser, error) {
-	// stream.Writer takes a WriteCloser, and will propagate Close calls (so
-	// that the ArmoredWriter will get closed), but we don't want to expose
-	// that behavior to our caller.
-	dstCloser := format.NopCloser(dst)
-	return encrypt(dstCloser, recipients...)
-}
-
-func EncryptWithArmor(dst io.Writer, recipients ...Recipient) (io.WriteCloser, error) {
-	dstCloser := format.ArmoredWriter(dst)
-	return encrypt(dstCloser, recipients...)
-}
-
-func encrypt(dst io.WriteCloser, recipients ...Recipient) (io.WriteCloser, error) {
 	if len(recipients) == 0 {
 		return nil, errors.New("no recipients specified")
 	}
@@ -68,7 +91,7 @@ func encrypt(dst io.WriteCloser, recipients ...Recipient) (io.WriteCloser, error
 		if err != nil {
 			return nil, fmt.Errorf("failed to wrap key for recipient #%d: %v", i, err)
 		}
-		hdr.Recipients = append(hdr.Recipients, block)
+		hdr.Recipients = append(hdr.Recipients, (*format.Stanza)(block))
 	}
 	if mac, err := headerMAC(fileKey, hdr); err != nil {
 		return nil, fmt.Errorf("failed to compute header MAC: %v", err)
@@ -90,6 +113,8 @@ func encrypt(dst io.WriteCloser, recipients ...Recipient) (io.WriteCloser, error
 	return stream.NewWriter(streamKey(fileKey, nonce), dst)
 }
 
+// Decrypt returns a Reader reading the decrypted plaintext of the age file read
+// from src. All identities will be tried until one successfully decrypts the file.
 func Decrypt(src io.Reader, identities ...Identity) (io.Reader, error) {
 	if len(identities) == 0 {
 		return nil, errors.New("no identities specified")
@@ -115,7 +140,7 @@ RecipientsLoop:
 			}
 
 			if i, ok := i.(IdentityMatcher); ok {
-				err := i.Matches(r)
+				err := i.Match((*Stanza)(r))
 				if err != nil {
 					if err == ErrIncorrectIdentity {
 						continue
@@ -124,7 +149,7 @@ RecipientsLoop:
 				}
 			}
 
-			fileKey, err = i.Unwrap(r)
+			fileKey, err = i.Unwrap((*Stanza)(r))
 			if err != nil {
 				if err == ErrIncorrectIdentity {
 					// TODO: we should collect these errors and return them as an
