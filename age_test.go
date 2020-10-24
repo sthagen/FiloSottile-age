@@ -8,11 +8,12 @@ package age_test
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
+	"os"
+	"strings"
 	"testing"
 
 	"filippo.io/age"
@@ -43,31 +44,59 @@ func ExampleEncrypt() {
 	// Encrypted file size: 219
 }
 
-var fileContents, _ = hex.DecodeString("6167652d656e6372797074696f6e2e6f72" +
-	"672f76310a2d3e20583235353139203868726c4d2b5a4247334464346646322b61353" +
-	"8337a64544957446b382f5234316b43595a7376775457340a794f345059646c4d5744" +
-	"4a2b437867554e527159355a30542f6d2b6733464368356a4978474c62435658630a2" +
-	"d2d2d20492f696d65765a7a79383132304a537a6d4a6e6d6e2f4b4d6b337035413131" +
-	"5638334e6b34316d394e50450a70c5e53624a1520753f92c5ad10ecab273ba4d61178" +
-	"07713e83820417a1df2ca08182272c8f85c857734a1311a3b75e98d0eaf")
+// DO NOT hardcode the private key. Store it in a secret storage solution,
+// on disk if the local machine is trusted, or have the user provide it.
+var privateKey string
 
-var privateKey = "AGE-SECRET-KEY-184JMZMVQH3E6U0PSL869004Y3U2NYV7R30EU99CSEDNPH02YUVFSZW44VU"
+func init() {
+	privateKey = "AGE-SECRET-KEY-184JMZMVQH3E6U0PSL869004Y3U2NYV7R30EU99CSEDNPH02YUVFSZW44VU"
+}
 
 func ExampleDecrypt() {
-	// DO NOT hardcode the private key. Store it in a secret storage solution,
-	// on disk if the local machine is trusted, or have the user provide it.
 	identity, err := age.ParseX25519Identity(privateKey)
 	if err != nil {
-		log.Fatalf("Failed to parse private key %q: %v", privateKey, err)
+		log.Fatalf("Failed to parse private key: %v", err)
 	}
 
-	out := &bytes.Buffer{}
-	f := bytes.NewReader(fileContents)
+	f, err := os.Open("testdata/example.age")
+	if err != nil {
+		log.Fatalf("Failed to open file: %v", err)
+	}
 
 	r, err := age.Decrypt(f, identity)
 	if err != nil {
 		log.Fatalf("Failed to open encrypted file: %v", err)
 	}
+	out := &bytes.Buffer{}
+	if _, err := io.Copy(out, r); err != nil {
+		log.Fatalf("Failed to read encrypted file: %v", err)
+	}
+
+	fmt.Printf("File contents: %q\n", out.Bytes())
+	// Output:
+	// File contents: "Black lives matter."
+}
+
+func ExampleParseIdentities() {
+	keyFile, err := os.Open("testdata/keys.txt")
+	if err != nil {
+		log.Fatalf("Failed to open private keys file: %v", err)
+	}
+	identities, err := age.ParseIdentities(keyFile)
+	if err != nil {
+		log.Fatalf("Failed to parse private key: %v", err)
+	}
+
+	f, err := os.Open("testdata/example.age")
+	if err != nil {
+		log.Fatalf("Failed to open file: %v", err)
+	}
+
+	r, err := age.Decrypt(f, identities...)
+	if err != nil {
+		log.Fatalf("Failed to open encrypted file: %v", err)
+	}
+	out := &bytes.Buffer{}
 	if _, err := io.Copy(out, r); err != nil {
 		log.Fatalf("Failed to read encrypted file: %v", err)
 	}
@@ -160,5 +189,37 @@ func TestEncryptDecryptScrypt(t *testing.T) {
 	}
 	if string(outBytes) != helloWorld {
 		t.Errorf("wrong data: %q, excepted %q", outBytes, helloWorld)
+	}
+}
+
+func TestParseIdentities(t *testing.T) {
+	tests := []struct {
+		name      string
+		wantCount int
+		wantErr   bool
+		file      string
+	}{
+		{"valid", 2, false, `
+# this is a comment
+# AGE-SECRET-KEY-1705XN76M8EYQ8M9PY4E2G3KA8DN7NSCGT3V4HMN20H3GCX4AS6HSSTG8D3
+#
+
+AGE-SECRET-KEY-1D6K0SGAX3NU66R4GYFZY0UQWCLM3UUSF3CXLW4KXZM342WQSJ82QKU59QJ
+AGE-SECRET-KEY-19WUMFE89H3928FRJ5U3JYRNHM6CERQGKSQ584AQ8QY7T7R09D32SWE4DYH`},
+		{"invalid", 0, true, `
+AGE-SECRET-KEY-1705XN76M8EYQ8M9PY4E2G3KA8DN7NSCGT3V4HMN20H3GCX4AS6HSSTG8D3
+AGE-SECRET-KEY--1D6K0SGAX3NU66R4GYFZY0UQWCLM3UUSF3CXLW4KXZM342WQSJ82QKU59Q`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := age.ParseIdentities(strings.NewReader(tt.file))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseIdentities() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if len(got) != tt.wantCount {
+				t.Errorf("ParseIdentities() returned %d identities, want %d", len(got), tt.wantCount)
+			}
+		})
 	}
 }

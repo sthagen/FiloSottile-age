@@ -12,8 +12,29 @@
 // ScryptRecipient and ScryptIdentity. For compatibility with existing SSH keys
 // use the filippo.io/age/agessh package.
 //
-// Age encrypted files are binary and not malleable, for encoding them as text,
+// Age encrypted files are binary and not malleable. For encoding them as text,
 // use the filippo.io/age/armor package.
+//
+// Key management
+//
+// Age does not have a global keyring. Instead, since age keys are small,
+// textual, and cheap, you are encoraged to generate dedicated keys for each
+// task and application.
+//
+// Recipient public keys can be passed around as command line flags and in
+// config files, while secret keys should be stored in dedicated files, through
+// secret management systems, or as environment variables.
+//
+// There is no default path for age keys. Instead, they should be stored at
+// application-specific paths. The CLI supports files where private keys are
+// listed one per line, ignoring empty lines and lines starting with "#". These
+// files can be parsed with ParseIdentities.
+//
+// When integrating age into a new system, it's recommended that you only
+// support X25519 keys, and not SSH keys. The latter are supported for manual
+// encryption operations. If you need to tie into existing key management
+// infrastructure, you might want to consider implementing your own Recipient
+// and Identity.
 package age
 
 import (
@@ -66,17 +87,22 @@ type Stanza struct {
 	Body []byte
 }
 
-// Encrypt returns a WriteCloser. Writes to the returned value are encrypted and
-// written to dst as an age file. Every recipient will be able to decrypt the file.
+const fileKeySize = 16
+const streamNonceSize = 16
+
+// Encrypt encrypts a file to one or more recipients.
 //
-// The caller must call Close on the returned value when done for the last chunk
-// to be encrypted and flushed to dst.
+// Writes to the returned WriteCloser are encrypted and written to dst as an age
+// file. Every recipient will be able to decrypt the file.
+//
+// The caller must call Close on the WriteCloser when done for the last chunk to
+// be encrypted and flushed to dst.
 func Encrypt(dst io.Writer, recipients ...Recipient) (io.WriteCloser, error) {
 	if len(recipients) == 0 {
 		return nil, errors.New("no recipients specified")
 	}
 
-	fileKey := make([]byte, 16)
+	fileKey := make([]byte, fileKeySize)
 	if _, err := rand.Read(fileKey); err != nil {
 		return nil, err
 	}
@@ -102,7 +128,7 @@ func Encrypt(dst io.Writer, recipients ...Recipient) (io.WriteCloser, error) {
 		return nil, fmt.Errorf("failed to write header: %v", err)
 	}
 
-	nonce := make([]byte, 16)
+	nonce := make([]byte, streamNonceSize)
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
@@ -113,7 +139,9 @@ func Encrypt(dst io.Writer, recipients ...Recipient) (io.WriteCloser, error) {
 	return stream.NewWriter(streamKey(fileKey, nonce), dst)
 }
 
-// Decrypt returns a Reader reading the decrypted plaintext of the age file read
+// Decrypt decrypts a file encrypted to one or more identities.
+//
+// It returns a Reader reading the decrypted plaintext of the age file read
 // from src. All identities will be tried until one successfully decrypts the file.
 func Decrypt(src io.Reader, identities ...Identity) (io.Reader, error) {
 	if len(identities) == 0 {
@@ -173,7 +201,7 @@ RecipientsLoop:
 		return nil, errors.New("bad header MAC")
 	}
 
-	nonce := make([]byte, 16)
+	nonce := make([]byte, streamNonceSize)
 	if _, err := io.ReadFull(payload, nonce); err != nil {
 		return nil, fmt.Errorf("failed to read nonce: %v", err)
 	}

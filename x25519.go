@@ -7,6 +7,7 @@
 package age
 
 import (
+	"bufio"
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
@@ -23,7 +24,11 @@ import (
 
 const x25519Label = "age-encryption.org/v1/X25519"
 
-// X25519Recipient is the standard age public key, based on a Curve25519 point.
+// X25519Recipient is the standard age public key. Messages encrypted to this
+// recipient can be decrypted with the corresponding X25519Identity.
+//
+// This recipient is anonymous, in the sense that an attacker can't tell from
+// the message alone if it is encrypted to a certain recipient.
 type X25519Recipient struct {
 	theirPublicKey []byte
 }
@@ -105,7 +110,8 @@ func (r *X25519Recipient) String() string {
 	return s
 }
 
-// X25519Identity is the standard age private key, based on a Curve25519 scalar.
+// X25519Identity is the standard age private key, which can decrypt messages
+// encrypted to the corresponding X25519Recipient.
 type X25519Identity struct {
 	secretKey, ourPublicKey []byte
 }
@@ -136,21 +142,55 @@ func GenerateX25519Identity() (*X25519Identity, error) {
 	return newX25519IdentityFromScalar(secretKey)
 }
 
-// ParseX25519Identity returns a new X25519Recipient from a Bech32 private key
+// ParseX25519Identity returns a new X25519Identity from a Bech32 private key
 // encoding with the "AGE-SECRET-KEY-1" prefix.
 func ParseX25519Identity(s string) (*X25519Identity, error) {
 	t, k, err := bech32.Decode(s)
 	if err != nil {
-		return nil, fmt.Errorf("malformed secret key %q: %v", s, err)
+		return nil, fmt.Errorf("malformed secret key: %v", err)
 	}
 	if t != "AGE-SECRET-KEY-" {
-		return nil, fmt.Errorf("malformed secret key %q: invalid type %q", s, t)
+		return nil, fmt.Errorf("malformed secret key: unknown type %q", t)
 	}
 	r, err := newX25519IdentityFromScalar(k)
 	if err != nil {
-		return nil, fmt.Errorf("malformed secret key %q: %v", s, err)
+		return nil, fmt.Errorf("malformed secret key: %v", err)
 	}
 	return r, nil
+}
+
+// ParseIdentities parses a file with one or more private key encodings, one per
+// line. Empty lines and lines starting with "#" are ignored.
+//
+// This is the same syntax as the private key files accepted by the CLI, except
+// the CLI also accepts SSH private keys, which are not recommended for the
+// average application.
+//
+// Currently, all returned values are of type X25519Identity, but different
+// types might be returned in the future.
+func ParseIdentities(f io.Reader) ([]Identity, error) {
+	const privateKeySizeLimit = 1 << 24 // 16 MiB
+	var ids []Identity
+	scanner := bufio.NewScanner(io.LimitReader(f, privateKeySizeLimit))
+	var n int
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#") || line == "" {
+			continue
+		}
+		i, err := ParseX25519Identity(line)
+		if err != nil {
+			return nil, fmt.Errorf("error at line %d: %v", n, err)
+		}
+		ids = append(ids, i)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read secret keys file: %v", err)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("no secret keys found")
+	}
+	return ids, nil
 }
 
 func (i *X25519Identity) Unwrap(block *Stanza) ([]byte, error) {
@@ -182,7 +222,7 @@ func (i *X25519Identity) Unwrap(block *Stanza) ([]byte, error) {
 		return nil, err
 	}
 
-	fileKey, err := aeadDecrypt(wrappingKey, block.Body)
+	fileKey, err := aeadDecrypt(wrappingKey, fileKeySize, block.Body)
 	if err != nil {
 		return nil, ErrIncorrectIdentity
 	}
