@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"filippo.io/age/agessh"
-	"filippo.io/age/internal/format"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -37,23 +36,16 @@ func TestSSHRSARoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if r.Type() != i.Type() || r.Type() != "ssh-rsa" {
-		t.Errorf("invalid Type values: %v, %v", r.Type(), i.Type())
-	}
-
 	fileKey := make([]byte, 16)
 	if _, err := rand.Read(fileKey); err != nil {
 		t.Fatal(err)
 	}
-	block, err := r.Wrap(fileKey)
+	stanzas, err := r.Wrap(fileKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &bytes.Buffer{}
-	(*format.Stanza)(block).Marshal(b)
-	t.Logf("%s", b.Bytes())
 
-	out, err := i.Unwrap(block)
+	out, err := i.Unwrap(stanzas)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,23 +74,16 @@ func TestSSHEd25519RoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if r.Type() != i.Type() || r.Type() != "ssh-ed25519" {
-		t.Errorf("invalid Type values: %v, %v", r.Type(), i.Type())
-	}
-
 	fileKey := make([]byte, 16)
 	if _, err := rand.Read(fileKey); err != nil {
 		t.Fatal(err)
 	}
-	block, err := r.Wrap(fileKey)
+	stanzas, err := r.Wrap(fileKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &bytes.Buffer{}
-	(*format.Stanza)(block).Marshal(b)
-	t.Logf("%s", b.Bytes())
 
-	out, err := i.Unwrap(block)
+	out, err := i.Unwrap(stanzas)
 	if err != nil {
 		t.Fatal(err)
 	}

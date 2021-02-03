@@ -35,8 +35,6 @@ type ScryptRecipient struct {
 
 var _ Recipient = &ScryptRecipient{}
 
-func (*ScryptRecipient) Type() string { return "scrypt" }
-
 // NewScryptRecipient returns a new ScryptRecipient with the provided password.
 func NewScryptRecipient(password string) (*ScryptRecipient, error) {
 	if len(password) == 0 {
@@ -63,7 +61,7 @@ func (r *ScryptRecipient) SetWorkFactor(logN int) {
 
 const scryptSaltSize = 16
 
-func (r *ScryptRecipient) Wrap(fileKey []byte) (*Stanza, error) {
+func (r *ScryptRecipient) Wrap(fileKey []byte) ([]*Stanza, error) {
 	salt := make([]byte, scryptSaltSize)
 	if _, err := rand.Read(salt[:]); err != nil {
 		return nil, err
@@ -87,7 +85,7 @@ func (r *ScryptRecipient) Wrap(fileKey []byte) (*Stanza, error) {
 	}
 	l.Body = wrappedKey
 
-	return l, nil
+	return []*Stanza{l}, nil
 }
 
 // ScryptIdentity is a password-based identity.
@@ -97,8 +95,6 @@ type ScryptIdentity struct {
 }
 
 var _ Identity = &ScryptIdentity{}
-
-func (*ScryptIdentity) Type() string { return "scrypt" }
 
 // NewScryptIdentity returns a new ScryptIdentity with the provided password.
 func NewScryptIdentity(password string) (*ScryptIdentity, error) {
@@ -125,7 +121,11 @@ func (i *ScryptIdentity) SetMaxWorkFactor(logN int) {
 	i.maxWorkFactor = logN
 }
 
-func (i *ScryptIdentity) Unwrap(block *Stanza) ([]byte, error) {
+func (i *ScryptIdentity) Unwrap(stanzas []*Stanza) ([]byte, error) {
+	return multiUnwrap(i.unwrap, stanzas)
+}
+
+func (i *ScryptIdentity) unwrap(block *Stanza) ([]byte, error) {
 	if block.Type != "scrypt" {
 		return nil, ErrIncorrectIdentity
 	}
@@ -159,12 +159,14 @@ func (i *ScryptIdentity) Unwrap(block *Stanza) ([]byte, error) {
 	// This AEAD is not robust, so an attacker could craft a message that
 	// decrypts under two different keys (meaning two different passphrases) and
 	// then use an error side-channel in an online decryption oracle to learn if
-	// either key is correct. This is deemed acceptable because the usa case (an
+	// either key is correct. This is deemed acceptable because the use case (an
 	// online decryption oracle) is not recommended, and the security loss is
-	// only one bit. This also does not bypass any scrypt work, but that work
+	// only one bit. This also does not bypass any scrypt work, although that work
 	// can be precomputed in an online oracle scenario.
 	fileKey, err := aeadDecrypt(k, fileKeySize, block.Body)
-	if err != nil {
+	if err == errIncorrectCiphertextSize {
+		return nil, errors.New("invalid scrypt recipient block: incorrect file key size")
+	} else if err != nil {
 		return nil, ErrIncorrectIdentity
 	}
 	return fileKey, nil

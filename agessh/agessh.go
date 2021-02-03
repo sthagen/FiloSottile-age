@@ -12,7 +12,7 @@
 // keys, and native X25519 keys should be preferred otherwise.
 //
 // Note that these recipient types are not anonymous: the encrypted message will
-// include a short 32-bit ID of the public key,
+// include a short 32-bit ID of the public key.
 package agessh
 
 import (
@@ -48,8 +48,6 @@ type RSARecipient struct {
 
 var _ age.Recipient = &RSARecipient{}
 
-func (*RSARecipient) Type() string { return "ssh-rsa" }
-
 func NewRSARecipient(pk ssh.PublicKey) (*RSARecipient, error) {
 	if pk.Type() != "ssh-rsa" {
 		return nil, errors.New("SSH public key is not an RSA key")
@@ -70,7 +68,7 @@ func NewRSARecipient(pk ssh.PublicKey) (*RSARecipient, error) {
 	return r, nil
 }
 
-func (r *RSARecipient) Wrap(fileKey []byte) (*age.Stanza, error) {
+func (r *RSARecipient) Wrap(fileKey []byte) ([]*age.Stanza, error) {
 	l := &age.Stanza{
 		Type: "ssh-rsa",
 		Args: []string{sshFingerprint(r.sshKey)},
@@ -83,7 +81,7 @@ func (r *RSARecipient) Wrap(fileKey []byte) (*age.Stanza, error) {
 	}
 	l.Body = wrappedKey
 
-	return l, nil
+	return []*age.Stanza{l}, nil
 }
 
 type RSAIdentity struct {
@@ -92,8 +90,6 @@ type RSAIdentity struct {
 }
 
 var _ age.Identity = &RSAIdentity{}
-
-func (*RSAIdentity) Type() string { return "ssh-rsa" }
 
 func NewRSAIdentity(key *rsa.PrivateKey) (*RSAIdentity, error) {
 	s, err := ssh.NewSignerFromKey(key)
@@ -106,7 +102,11 @@ func NewRSAIdentity(key *rsa.PrivateKey) (*RSAIdentity, error) {
 	return i, nil
 }
 
-func (i *RSAIdentity) Unwrap(block *age.Stanza) ([]byte, error) {
+func (i *RSAIdentity) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
+	return multiUnwrap(i.unwrap, stanzas)
+}
+
+func (i *RSAIdentity) unwrap(block *age.Stanza) ([]byte, error) {
 	if block.Type != "ssh-rsa" {
 		return nil, age.ErrIncorrectIdentity
 	}
@@ -132,8 +132,6 @@ type Ed25519Recipient struct {
 }
 
 var _ age.Recipient = &Ed25519Recipient{}
-
-func (*Ed25519Recipient) Type() string { return "ssh-ed25519" }
 
 func NewEd25519Recipient(pk ssh.PublicKey) (*Ed25519Recipient, error) {
 	if pk.Type() != "ssh-ed25519" {
@@ -193,7 +191,7 @@ func ed25519PublicKeyToCurve25519(pk ed25519.PublicKey) ([]byte, error) {
 
 const ed25519Label = "age-encryption.org/v1/ssh-ed25519"
 
-func (r *Ed25519Recipient) Wrap(fileKey []byte) (*age.Stanza, error) {
+func (r *Ed25519Recipient) Wrap(fileKey []byte) ([]*age.Stanza, error) {
 	ephemeral := make([]byte, curve25519.ScalarSize)
 	if _, err := rand.Read(ephemeral); err != nil {
 		return nil, err
@@ -236,7 +234,7 @@ func (r *Ed25519Recipient) Wrap(fileKey []byte) (*age.Stanza, error) {
 	}
 	l.Body = wrappedKey
 
-	return l, nil
+	return []*age.Stanza{l}, nil
 }
 
 type Ed25519Identity struct {
@@ -245,8 +243,6 @@ type Ed25519Identity struct {
 }
 
 var _ age.Identity = &Ed25519Identity{}
-
-func (*Ed25519Identity) Type() string { return "ssh-ed25519" }
 
 func NewEd25519Identity(key ed25519.PrivateKey) (*Ed25519Identity, error) {
 	s, err := ssh.NewSignerFromKey(key)
@@ -284,7 +280,11 @@ func ed25519PrivateKeyToCurve25519(pk ed25519.PrivateKey) []byte {
 	return out[:curve25519.ScalarSize]
 }
 
-func (i *Ed25519Identity) Unwrap(block *age.Stanza) ([]byte, error) {
+func (i *Ed25519Identity) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
+	return multiUnwrap(i.unwrap, stanzas)
+}
+
+func (i *Ed25519Identity) unwrap(block *age.Stanza) ([]byte, error) {
 	if block.Type != "ssh-ed25519" {
 		return nil, age.ErrIncorrectIdentity
 	}
@@ -329,6 +329,26 @@ func (i *Ed25519Identity) Unwrap(block *age.Stanza) ([]byte, error) {
 		return nil, fmt.Errorf("failed to decrypt file key: %v", err)
 	}
 	return fileKey, nil
+}
+
+// multiUnwrap is copied from package age. It's a helper that implements
+// Identity.Unwrap in terms of a function that unwraps a single recipient
+// stanza.
+func multiUnwrap(unwrap func(*age.Stanza) ([]byte, error), stanzas []*age.Stanza) ([]byte, error) {
+	for _, s := range stanzas {
+		fileKey, err := unwrap(s)
+		if errors.Is(err, age.ErrIncorrectIdentity) {
+			// If we ever start returning something interesting wrapping
+			// ErrIncorrectIdentity, we should let it make its way up through
+			// Decrypt into NoIdentityMatchError.Errors.
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		return fileKey, nil
+	}
+	return nil, age.ErrIncorrectIdentity
 }
 
 // aeadEncrypt and aeadDecrypt are copied from package age.

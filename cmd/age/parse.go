@@ -8,14 +8,17 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"strings"
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
+	"golang.org/x/crypto/cryptobyte"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -30,12 +33,98 @@ func parseRecipient(arg string) (age.Recipient, error) {
 	return nil, fmt.Errorf("unknown recipient type: %q", arg)
 }
 
-func parseIdentitiesFile(name string) ([]age.Identity, error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %v", err)
+func parseRecipientsFile(name string) ([]age.Recipient, error) {
+	var f *os.File
+	if name == "-" {
+		if stdinInUse {
+			return nil, fmt.Errorf("standard input is used for multiple purposes")
+		}
+		stdinInUse = true
+		f = os.Stdin
+	} else {
+		var err error
+		f, err = os.Open(name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open recipient file: %v", err)
+		}
+		defer f.Close()
 	}
-	defer f.Close()
+
+	const recipientFileSizeLimit = 16 << 20 // 16 MiB
+	const lineLengthLimit = 8 << 10         // 8 KiB, same as sshd(8)
+	var recs []age.Recipient
+	scanner := bufio.NewScanner(io.LimitReader(f, recipientFileSizeLimit))
+	var n int
+	for scanner.Scan() {
+		n++
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#") || line == "" {
+			continue
+		}
+		if len(line) > lineLengthLimit {
+			return nil, fmt.Errorf("%q: line %d is too long", name, n)
+		}
+		r, err := parseRecipient(line)
+		if err != nil {
+			if t, ok := sshKeyType(line); ok {
+				// Skip unsupported but valid SSH public keys with a warning.
+				log.Printf("Warning: recipients file %q: ignoring unsupported SSH key of type %q at line %d", name, t, n)
+				continue
+			}
+			// Hide the error since it might unintentionally leak the contents
+			// of confidential files.
+			return nil, fmt.Errorf("%q: malformed recipient at line %d", name, n)
+		}
+		recs = append(recs, r)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("%q: failed to read recipients file: %v", name, err)
+	}
+	if len(recs) == 0 {
+		return nil, fmt.Errorf("%q: no recipients found", name)
+	}
+	return recs, nil
+}
+
+func sshKeyType(s string) (string, bool) {
+	// TODO: also ignore options? And maybe support multiple spaces and tabs as
+	// field separators like OpenSSH?
+	fields := strings.Split(s, " ")
+	if len(fields) < 2 {
+		return "", false
+	}
+	key, err := base64.StdEncoding.DecodeString(fields[1])
+	if err != nil {
+		return "", false
+	}
+	k := cryptobyte.String(key)
+	var typeLen uint32
+	var typeBytes []byte
+	if !k.ReadUint32(&typeLen) || !k.ReadBytes(&typeBytes, int(typeLen)) {
+		return "", false
+	}
+	if t := fields[0]; t == string(typeBytes) {
+		return t, true
+	}
+	return "", false
+}
+
+func parseIdentitiesFile(name string) ([]age.Identity, error) {
+	var f *os.File
+	if name == "-" {
+		if stdinInUse {
+			return nil, fmt.Errorf("standard input is used for multiple purposes")
+		}
+		stdinInUse = true
+		f = os.Stdin
+	} else {
+		var err error
+		f, err = os.Open(name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open file: %v", err)
+		}
+		defer f.Close()
+	}
 
 	b := bufio.NewReader(f)
 	const pemHeader = "-----BEGIN"
@@ -90,11 +179,16 @@ func parseSSHIdentity(name string, pemBytes []byte) ([]age.Identity, error) {
 }
 
 func readPubFile(name string) (ssh.PublicKey, error) {
+	if name == "-" {
+		return nil, fmt.Errorf(`failed to obtain public key for "-" SSH key
+
+Use a file for which the corresponding ".pub" file exists, or convert the private key to a modern format with "ssh-keygen -p -m RFC4716"`)
+	}
 	f, err := os.Open(name + ".pub")
 	if err != nil {
 		return nil, fmt.Errorf(`failed to obtain public key for %q SSH key: %v
 
-    Ensure %q exists, or convert the private key %q to a modern format with "ssh-keygen -p -m RFC4716"`, name, err, name+".pub", name)
+Ensure %q exists, or convert the private key %q to a modern format with "ssh-keygen -p -m RFC4716"`, name, err, name+".pub", name)
 	}
 	defer f.Close()
 	contents, err := ioutil.ReadAll(f)

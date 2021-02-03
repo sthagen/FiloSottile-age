@@ -7,7 +7,6 @@
 package age
 
 import (
-	"bufio"
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
@@ -34,8 +33,6 @@ type X25519Recipient struct {
 }
 
 var _ Recipient = &X25519Recipient{}
-
-func (*X25519Recipient) Type() string { return "X25519" }
 
 // newX25519RecipientFromPoint returns a new X25519Recipient from a raw Curve25519 point.
 func newX25519RecipientFromPoint(publicKey []byte) (*X25519Recipient, error) {
@@ -66,7 +63,7 @@ func ParseX25519Recipient(s string) (*X25519Recipient, error) {
 	return r, nil
 }
 
-func (r *X25519Recipient) Wrap(fileKey []byte) (*Stanza, error) {
+func (r *X25519Recipient) Wrap(fileKey []byte) ([]*Stanza, error) {
 	ephemeral := make([]byte, curve25519.ScalarSize)
 	if _, err := rand.Read(ephemeral); err != nil {
 		return nil, err
@@ -101,7 +98,7 @@ func (r *X25519Recipient) Wrap(fileKey []byte) (*Stanza, error) {
 	}
 	l.Body = wrappedKey
 
-	return l, nil
+	return []*Stanza{l}, nil
 }
 
 // String returns the Bech32 public key encoding of r.
@@ -117,8 +114,6 @@ type X25519Identity struct {
 }
 
 var _ Identity = &X25519Identity{}
-
-func (*X25519Identity) Type() string { return "X25519" }
 
 // newX25519IdentityFromScalar returns a new X25519Identity from a raw Curve25519 scalar.
 func newX25519IdentityFromScalar(secretKey []byte) (*X25519Identity, error) {
@@ -159,41 +154,11 @@ func ParseX25519Identity(s string) (*X25519Identity, error) {
 	return r, nil
 }
 
-// ParseIdentities parses a file with one or more private key encodings, one per
-// line. Empty lines and lines starting with "#" are ignored.
-//
-// This is the same syntax as the private key files accepted by the CLI, except
-// the CLI also accepts SSH private keys, which are not recommended for the
-// average application.
-//
-// Currently, all returned values are of type X25519Identity, but different
-// types might be returned in the future.
-func ParseIdentities(f io.Reader) ([]Identity, error) {
-	const privateKeySizeLimit = 1 << 24 // 16 MiB
-	var ids []Identity
-	scanner := bufio.NewScanner(io.LimitReader(f, privateKeySizeLimit))
-	var n int
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "#") || line == "" {
-			continue
-		}
-		i, err := ParseX25519Identity(line)
-		if err != nil {
-			return nil, fmt.Errorf("error at line %d: %v", n, err)
-		}
-		ids = append(ids, i)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read secret keys file: %v", err)
-	}
-	if len(ids) == 0 {
-		return nil, fmt.Errorf("no secret keys found")
-	}
-	return ids, nil
+func (i *X25519Identity) Unwrap(stanzas []*Stanza) ([]byte, error) {
+	return multiUnwrap(i.unwrap, stanzas)
 }
 
-func (i *X25519Identity) Unwrap(block *Stanza) ([]byte, error) {
+func (i *X25519Identity) unwrap(block *Stanza) ([]byte, error) {
 	if block.Type != "X25519" {
 		return nil, ErrIncorrectIdentity
 	}
@@ -223,7 +188,9 @@ func (i *X25519Identity) Unwrap(block *Stanza) ([]byte, error) {
 	}
 
 	fileKey, err := aeadDecrypt(wrappingKey, fileKeySize, block.Body)
-	if err != nil {
+	if err == errIncorrectCiphertextSize {
+		return nil, errors.New("invalid X25519 recipient block: incorrect file key size")
+	} else if err != nil {
 		return nil, ErrIncorrectIdentity
 	}
 	return fileKey, nil
