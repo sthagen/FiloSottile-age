@@ -1,8 +1,6 @@
 # age
 
-[![pkg.go.dev](https://pkg.go.dev/badge/filippo.io/age)](https://pkg.go.dev/filippo.io/age)
-
-age is a simple, modern and secure file encryption tool, format, and library.
+age is a simple, modern and secure file encryption tool, format, and [Go library](https://pkg.go.dev/filippo.io/age).
 
 It features small explicit keys, no config options, and UNIX-style composability.
 
@@ -16,6 +14,8 @@ $ age --decrypt -i key.txt data.tar.gz.age > data.tar.gz
 The format specification is at [age-encryption.org/v1](https://age-encryption.org/v1). age was designed by [@Benjojo12](https://twitter.com/Benjojo12) and [@FiloSottile](https://twitter.com/FiloSottile).
 
 An alternative interoperable Rust implementation is available at [github.com/str4d/rage](https://github.com/str4d/rage).
+
+The author pronounces it `[aɡe̞]`, like the Italian [“aghe”](https://translate.google.com/?sl=it&text=aghe).
 
 ## Usage
 
@@ -108,38 +108,71 @@ Keep in mind that people might not protect SSH keys long-term, since they are re
 
 ## Installation
 
-On macOS or Linux, you can use Homebrew:
+<table>
+    <tr>
+        <td>Homebrew (macOS or Linux)</td>
+        <td>
+            <code>brew tap filippo.io/age https://filippo.io/age</code><br>
+            <code>brew install age</code>
+        </td>
+    </tr>
+    <tr>
+        <td>MacPorts</td>
+        <td>
+            <code>port install age</code>
+        </td>
+    </tr>
+    <tr>
+        <td>Ubuntu 21.04+</td>
+        <td>
+            <code>apt install age</code>
+        </td>
+    </tr>
+    <tr>
+        <td>Debian 11+ (Bullseye)</td>
+        <td>
+            <code>apt install age</code>
+        </td>
+    </tr>
+    <tr>
+        <td>Arch Linux</td>
+        <td>
+            <code>pacman -Syu age</code>
+        </td>
+    </tr>
+    <tr>
+        <td>Fedora 33+</td>
+        <td>
+            <code>dnf install age</code>
+        </td>
+    </tr>
+    <tr>
+        <td>OpenBSD 6.7+</td>
+        <td>
+            <code>pkg_add age</code> (security/age)
+        </td>
+    </tr>
+    <tr>
+        <td>FreeBSD</td>
+        <td>
+            <code>pkg install age</code> (security/age)
+        </td>
+    </tr>
+    <tr>
+        <td>NixOS / Nix</td>
+        <td>
+            <code>nix-env -i age</code>
+        </td>
+    </tr>
+</table>
 
-```
-brew tap filippo.io/age https://filippo.io/age
-brew install age
-```
+On Windows, Linux, macOS, and FreeBSD you can use [the pre-built binaries](https://github.com/FiloSottile/age/releases).
 
-On Windows, Linux, and macOS, you can use [the pre-built binaries](https://github.com/FiloSottile/age/releases).
-
-If your system has [Go 1.13+](https://golang.org/dl/), you can build from source:
+If your system has [Go 1.13+](https://golang.org/dl/), you can build from source.
 
 ```
 git clone https://filippo.io/age && cd age
 go build -o . filippo.io/age/cmd/...
-```
-
-On Arch Linux, age is available in the official repositories:
-
-```bash
-sudo pacman -Syu age
-```
-
-On OpenBSD -current and 6.7+, you can use the port:
-
-```
-pkg_add age
-```
-
-On all supported versions of FreeBSD, you can build the security/age port or use pkg:
-
-```
-pkg install age
 ```
 
 Help from new packagers is very welcome.
