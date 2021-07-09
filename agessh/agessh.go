@@ -65,6 +65,9 @@ func NewRSARecipient(pk ssh.PublicKey) (*RSARecipient, error) {
 	} else {
 		return nil, errors.New("pk does not implement ssh.CryptoPublicKey")
 	}
+	if r.pubKey.Size() < 2048/8 {
+		return nil, errors.New("RSA key size is too small")
+	}
 	return r, nil
 }
 
@@ -189,7 +192,7 @@ func ParseRecipient(s string) (age.Recipient, error) {
 func ed25519PublicKeyToCurve25519(pk ed25519.PublicKey) ([]byte, error) {
 	// See https://blog.filippo.io/using-ed25519-keys-for-encryption and
 	// https://pkg.go.dev/filippo.io/edwards25519#Point.BytesMontgomery.
-	p, err := (&edwards25519.Point{}).SetBytes(pk)
+	p, err := new(edwards25519.Point).SetBytes(pk)
 	if err != nil {
 		return nil, err
 	}
