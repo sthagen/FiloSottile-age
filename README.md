@@ -1,7 +1,7 @@
-# age
+<p align="center"><img alt="The age logo, an wireframe of St. Peters dome in Rome, with the text: age, file encryption" width="600" src="https://user-images.githubusercontent.com/1225294/132245842-fda4da6a-1cea-4738-a3da-2dc860861c98.png"></p>
 
 [![Go Reference](https://pkg.go.dev/badge/filippo.io/age.svg)](https://pkg.go.dev/filippo.io/age)
-[![man page](https://img.shields.io/badge/man-page-lightgrey)](https://htmlpreview.github.io/?https://github.com/FiloSottile/age/blob/master/doc/age.1.html)
+[![man page](https://img.shields.io/badge/man-page-lightgrey)](https://filippo.io/age/age.1)
 
 age is a simple, modern and secure file encryption tool, format, and Go library.
 
@@ -22,7 +22,7 @@ The author pronounces it `[aɡe̞]`, like the Italian [“aghe”](https://trans
 
 ## Usage
 
-For the full documentation, read [the age(1) man page](https://htmlpreview.github.io/?https://github.com/FiloSottile/age/blob/master/doc/age.1.html).
+For the full documentation, read [the age(1) man page](https://filippo.io/age/age.1).
 
 ```
 Usage:
@@ -139,7 +139,6 @@ Keep in mind that people might not protect SSH keys long-term, since they are re
     <tr>
         <td>Homebrew (macOS or Linux)</td>
         <td>
-            <code>brew tap filippo.io/age https://filippo.io/age</code><br>
             <code>brew install age</code>
         </td>
     </tr>
@@ -205,7 +204,13 @@ Keep in mind that people might not protect SSH keys long-term, since they are re
     </tr>
 </table>
 
-On Windows, Linux, macOS, and FreeBSD you can use [the pre-built binaries](https://github.com/FiloSottile/age/releases).
+On Windows, Linux, macOS, and FreeBSD you can use the pre-built binaries.
+
+```
+https://dl.filippo.io/age/latest?for=linux/amd64
+https://dl.filippo.io/age/v1.0.0-rc.1?for=darwin/arm64
+...
+```
 
 If your system has [Go 1.13+](https://golang.org/dl/), you can build from source.
 
