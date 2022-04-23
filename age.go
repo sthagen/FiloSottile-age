@@ -1,8 +1,6 @@
-// Copyright 2019 Google LLC
-//
+// Copyright 2019 The age Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file or at
-// https://developers.google.com/open-source/licenses/bsd
+// license that can be found in the LICENSE file.
 
 // Package age implements file encryption according to the age-encryption.org/v1
 // specification.
@@ -18,7 +16,7 @@
 // Key management
 //
 // Age does not have a global keyring. Instead, since age keys are small,
-// textual, and cheap, you are encoraged to generate dedicated keys for each
+// textual, and cheap, you are encouraged to generate dedicated keys for each
 // task and application.
 //
 // Recipient public keys can be passed around as command line flags and in

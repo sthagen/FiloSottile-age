@@ -1,8 +1,6 @@
-// Copyright 2019 Google LLC
-//
+// Copyright 2019 The age Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file or at
-// https://developers.google.com/open-source/licenses/bsd
+// license that can be found in the LICENSE file.
 
 package main
 
@@ -156,6 +154,7 @@ func convert(in io.Reader, out io.Writer) {
 
 func errorf(format string, v ...interface{}) {
 	log.Printf("age-keygen: error: "+format, v...)
+	log.Fatalf("age-keygen: report unexpected or unhelpful errors at https://filippo.io/age/report")
 }
 
 func warning(msg string) {
