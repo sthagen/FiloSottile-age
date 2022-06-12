@@ -15,12 +15,10 @@ import (
 	"filippo.io/age"
 	"filippo.io/age/agessh"
 	"filippo.io/age/armor"
+	"filippo.io/age/internal/plugin"
 	"golang.org/x/crypto/cryptobyte"
 	"golang.org/x/crypto/ssh"
 )
-
-// stdinInUse is set in main. It's a singleton like os.Stdin.
-var stdinInUse bool
 
 type gitHubRecipientError struct {
 	username string
@@ -32,6 +30,8 @@ func (gitHubRecipientError) Error() string {
 
 func parseRecipient(arg string) (age.Recipient, error) {
 	switch {
+	case strings.HasPrefix(arg, "age1") && strings.Count(arg, "1") > 1:
+		return plugin.NewRecipient(arg, pluginTerminalUI)
 	case strings.HasPrefix(arg, "age1"):
 		return age.ParseX25519Recipient(arg)
 	case strings.HasPrefix(arg, "ssh-"):
@@ -162,7 +162,7 @@ func parseIdentitiesFile(name string) ([]age.Identity, error) {
 		return []age.Identity{&EncryptedIdentity{
 			Contents: contents,
 			Passphrase: func() (string, error) {
-				pass, err := readPassphrase(fmt.Sprintf("Enter passphrase for identity file %q:", name))
+				pass, err := readSecret(fmt.Sprintf("Enter passphrase for identity file %q:", name))
 				if err != nil {
 					return "", fmt.Errorf("could not read passphrase: %v", err)
 				}
@@ -187,12 +187,52 @@ func parseIdentitiesFile(name string) ([]age.Identity, error) {
 
 	// An unencrypted age identity file.
 	default:
-		ids, err := age.ParseIdentities(b)
+		ids, err := parseIdentities(b)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read %q: %v", name, err)
 		}
 		return ids, nil
 	}
+}
+
+func parseIdentity(s string) (age.Identity, error) {
+	switch {
+	case strings.HasPrefix(s, "AGE-PLUGIN-"):
+		return plugin.NewIdentity(s, pluginTerminalUI)
+	case strings.HasPrefix(s, "AGE-SECRET-KEY-1"):
+		return age.ParseX25519Identity(s)
+	default:
+		return nil, fmt.Errorf("unknown identity type")
+	}
+}
+
+// parseIdentities is like age.ParseIdentities, but supports plugin identities.
+func parseIdentities(f io.Reader) ([]age.Identity, error) {
+	const privateKeySizeLimit = 1 << 24 // 16 MiB
+	var ids []age.Identity
+	scanner := bufio.NewScanner(io.LimitReader(f, privateKeySizeLimit))
+	var n int
+	for scanner.Scan() {
+		n++
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#") || line == "" {
+			continue
+		}
+
+		i, err := parseIdentity(line)
+		if err != nil {
+			return nil, fmt.Errorf("error at line %d: %v", n, err)
+		}
+		ids = append(ids, i)
+
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read secret keys file: %v", err)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("no secret keys found")
+	}
+	return ids, nil
 }
 
 func parseSSHIdentity(name string, pemBytes []byte) ([]age.Identity, error) {
@@ -206,7 +246,7 @@ func parseSSHIdentity(name string, pemBytes []byte) ([]age.Identity, error) {
 			}
 		}
 		passphrasePrompt := func() ([]byte, error) {
-			pass, err := readPassphrase(fmt.Sprintf("Enter passphrase for %q:", name))
+			pass, err := readSecret(fmt.Sprintf("Enter passphrase for %q:", name))
 			if err != nil {
 				return nil, fmt.Errorf("could not read passphrase for %q: %v", name, err)
 			}

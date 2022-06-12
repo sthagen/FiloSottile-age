@@ -5,7 +5,7 @@ age(1) -- simple, modern, and secure file encryption
 
 `age` [`--encrypt`] (`-r` <RECIPIENT> | `-R` <PATH>)... [`--armor`] [`-o` <OUTPUT>] [<INPUT>]<br>
 `age` [`--encrypt`] `--passphrase` [`--armor`] [`-o` <OUTPUT>] [<INPUT>]<br>
-`age` `--decrypt` [`-i` <PATH>]... [`-o` <OUTPUT>] [<INPUT>]<br>
+`age` `--decrypt` [`-i` <PATH> | `-j` <PLUGIN>]... [`-o` <OUTPUT>] [<INPUT>]<br>
 
 ## DESCRIPTION
 
@@ -13,13 +13,13 @@ age(1) -- simple, modern, and secure file encryption
 optional and defaults to standard input. Only a single <INPUT> file may be
 specified. If `-o` is not specified, <OUTPUT> defaults to standard output.
 
-If `--passphrase` is specified, the file is encrypted with a passphrase
+If `-p`/`--passphrase` is specified, the file is encrypted with a passphrase
 requested interactively. Otherwise, it's encrypted to one or more
 [RECIPIENTS][RECIPIENTS AND IDENTITIES] specified with `-r`/`--recipient` or
 `-R`/`--recipients-file`. Every recipient can decrypt the file.
 
-In `--decrypt` mode, passphrase-encrypted files are detected automatically and
-the passphrase is requested interactively. Otherwise, one or more
+In `-d`/`--decrypt` mode, passphrase-encrypted files are detected automatically
+and the passphrase is requested interactively. Otherwise, one or more
 [IDENTITIES][RECIPIENTS AND IDENTITIES] specified with `-i`/`--identity` are
 used to decrypt the file.
 
@@ -47,7 +47,7 @@ overhead per recipient, plus 16 bytes every 64KiB of plaintext.
     Encrypt to the explicitly specified <RECIPIENT>. See the
     [RECIPIENTS AND IDENTITIES][] section for possible recipient formats.
 
-    This option can be repeated and combined with `-R`/`--recipients-file`,
+    This option can be repeated and combined with other recipient flags,
     and the file can be decrypted by all provided recipients independently.
 
 * `-R`, `--recipients-file`=<PATH>:
@@ -58,15 +58,14 @@ overhead per recipient, plus 16 bytes every 64KiB of plaintext.
     If <PATH> is `-`, the recipients are read from standard input. In
     this case, the <INPUT> argument must be specified.
 
-    This option can be repeated and combined with `-r`/`--recipient`,
+    This option can be repeated and combined with other recipient flags,
     and the file can be decrypted by all provided recipients independently.
 
 * `-p`, `--passphrase`:
     Encrypt with a passphrase, requested interactively from the terminal.
     `age` will offer to auto-generate a secure passphrase.
 
-    This option can't be used with `-r`/`--recipient` or
-    `-R`/`--recipients-file`.
+    This option can't be used with other recipient flags.
 
 * `-a`, `--armor`:
     Encrypt to an ASCII-only "armored" encoding.
@@ -76,6 +75,27 @@ overhead per recipient, plus 16 bytes every 64KiB of plaintext.
     trailing extra data.
 
     Decryption transparently detects and decodes ASCII armoring.
+
+* `-i`, `--identity`=<PATH>:
+    Encrypt to the [RECIPIENTS][RECIPIENTS AND IDENTITIES] corresponding to the
+    [IDENTITIES][RECIPIENTS AND IDENTITIES] listed in the file at <PATH>. This
+    is equivalent to converting the file at <PATH> to a recipients file with
+    `age-keygen -y` and then passing that to `-R`/`--recipients-file`.
+
+    For the format of <PATH>, see the definition of `-i`/`--identity` in the
+    [Decryption options][] section.
+
+    `-e`/`--encrypt` must be explicitly specified when using `-i`/`--identity`
+    in encryption mode to avoid confusion.
+
+* `-j` <PLUGIN>:
+    Encrypt using the data-less [plugin][Plugins] <PLUGIN>.
+
+    This is equivalent to using `-i`/`--identity` with a file that contains a
+    single plugin `IDENTITY` that encodes no plugin-specific data.
+
+    `-e`/`--encrypt` must be explicitly specified when using `-j` in encryption
+    mode to avoid confusion.
 
 ### Decryption options
 
@@ -111,14 +131,16 @@ overhead per recipient, plus 16 bytes every 64KiB of plaintext.
     d\. "`-`", causing one of the options above to be read from standard input.
     In this case, the <INPUT> argument must be specified.
 
-    This option can be repeated. Identities are tried in the order in which
-    are provided, and the first one matching one of the file's recipients is
-    used. Unused identities are ignored.
+    This option can be repeated. Identities are tried in the order in which are
+    provided, and the first one matching one of the file's recipients is used.
+    Unused identities are ignored, but it is an error if the <INPUT> file is
+    passphrase-encrypted and `-i`/`--identity` is specified.
 
-    If `-e`/`--encrypt` is explicitly specified (to avoid confusion),
-    `-i`/`--identity` may also be used to encrypt to the `RECIPIENTS`
-    corresponding to the `IDENTITIES` listed at <PATH>. This allows using an
-    identity file as a symmetric key, if desired.
+* `-j` <PLUGIN>:
+    Decrypt using the data-less [plugin][Plugins] <PLUGIN>.
+
+    This is equivalent to using `-i`/`--identity` with a file that contains a
+    single plugin `IDENTITY` that encodes no plugin-specific data.
 
 ## RECIPIENTS AND IDENTITIES
 
@@ -172,6 +194,34 @@ or accessed via ssh-agent(1) are not supported.
 An encrypted file _can_ be linked to the SSH public key it was encrypted to.
 This is so that `age` can identify the correct SSH private key before
 requesting its password, if any.
+
+### Plugins
+
+`age` can be extended through plugins. A plugin is only loaded if a corresponding
+`RECIPIENT` or `IDENTITY` is specified. (Simply decrypting a file encrypted with
+a plugin will not cause it to load, for security reasons among others.)
+
+A `RECIPIENT` for a plugin named `example` starts with `age1example1`, while an
+`IDENTITY` starts with `AGE-PLUGIN-EXAMPLE-1`. They both encode arbitrary
+plugin-specific data, and are generated by the plugin.
+
+When either is specified, `age` searches for `age-plugin-example` in the PATH
+and executes it to perform the file header encryption or decryption. The plugin
+may request input from the user through `age` to complete the operation.
+
+Plugins can be freely mixed with other plugins or natively supported keys.
+
+A plugin is not bound to only encrypt or decrypt files meant for or generated by
+the plugin. For example, a plugin can be used to decrypt files encrypted to a
+native X25519 `RECIPIENT` or even with a passphrase. Similarly, a plugin can
+encrypt a file such that it can be decrypted without the use of any plugin.
+
+Plugins for which the `IDENTITY`/`RECIPIENT` distinction doesn't make sense
+(such as a symmetric encryption plugin) may generate only an `IDENTITY` and
+instruct the user to perform encryption with the `-e`/`--encrypt` and
+`-i`/`--identity` flags. Plugins for which the concept of separate identities
+doesn't make sense (such as a password-encryption plugin) may instruct the user
+to use the `-j` flag.
 
 ## EXIT STATUS
 
@@ -243,6 +293,14 @@ Encrypt and decrypt with an SSH public key:
     $ age -R ~/.ssh/id_ed25519.pub example.jpg > example.jpg.age
 
     $ age -d -i ~/.ssh/id_ed25519 example.jpg.age > example.jpg
+
+Encrypt and decrypt with age-plugin-yubikey:
+
+    $ age-plugin-yubikey # run interactive setup, generate identity file and obtain recipient
+
+    $ age -r age1yubikey1qwt50d05nh5vutpdzmlg5wn80xq5negm4uj9ghv0snvdd3yysf5yw3rhl3t secrets.txt > secrets.txt.age
+
+    $ age -d -i age-yubikey-identity-388178f3.txt secrets.txt.age
 
 Encrypt to the SSH keys of a GitHub user:
 
