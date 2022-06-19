@@ -6,17 +6,23 @@
 
 package main
 
-import "filippo.io/age/internal/testkit"
+import (
+	"bytes"
+
+	"filippo.io/age/internal/testkit"
+)
 
 func main() {
 	f := testkit.NewTestFile()
 	f.VersionLine("v1")
-	f.X25519RecordIdentity(f.Rand(32))
-	f.X25519NoRecordIdentity(testkit.TestX25519Identity)
-	f.Scrypt("password", 10)
+	f.X25519(testkit.TestX25519Identity)
+	hdr := f.Buf.Bytes()
+	f.Buf.Reset()
+	f.Buf.Write(bytes.Replace(hdr, []byte("\n"), []byte("\r\n"), -1))
 	f.HMAC()
+	f.Buf.WriteString(f.UnreadLine() + "\r\n")
 	f.Payload("age")
 	f.ExpectHeaderFailure()
-	f.Comment("scrypt stanzas must be alone in the header")
+	f.Comment("lines in the header end with CRLF instead of LF")
 	f.Generate()
 }

@@ -6,17 +6,22 @@
 
 package main
 
-import "filippo.io/age/internal/testkit"
+import (
+	"strings"
+
+	"filippo.io/age/internal/testkit"
+)
 
 func main() {
 	f := testkit.NewTestFile()
 	f.VersionLine("v1")
-	f.X25519RecordIdentity(f.Rand(32))
-	f.X25519NoRecordIdentity(testkit.TestX25519Identity)
-	f.Scrypt("password", 10)
+	f.X25519(testkit.TestX25519Recipient)
+	f.ArgsLine("stanza")
+	f.TextLine(strings.Repeat("A", 68))
+	f.TextLine("")
 	f.HMAC()
 	f.Payload("age")
 	f.ExpectHeaderFailure()
-	f.Comment("scrypt stanzas must be alone in the header")
+	f.Comment("a body line is longer than 64 columns")
 	f.Generate()
 }

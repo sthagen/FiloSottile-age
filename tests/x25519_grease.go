@@ -11,12 +11,12 @@ import "filippo.io/age/internal/testkit"
 func main() {
 	f := testkit.NewTestFile()
 	f.VersionLine("v1")
-	f.X25519RecordIdentity(f.Rand(32))
-	f.X25519NoRecordIdentity(testkit.TestX25519Identity)
-	f.Scrypt("password", 10)
+	f.ArgsLine("grease")
+	f.Body(nil)
+	f.X25519(testkit.TestX25519Recipient)
+	f.ArgsLine("grease")
+	f.Body(nil)
 	f.HMAC()
 	f.Payload("age")
-	f.ExpectHeaderFailure()
-	f.Comment("scrypt stanzas must be alone in the header")
 	f.Generate()
 }
