@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 
 //go:build ignore
+// +build ignore
 
 package main
 
@@ -12,8 +13,7 @@ func main() {
 	f := testkit.NewTestFile()
 	f.VersionLine("v1")
 	f.X25519(testkit.TestX25519Recipient)
-	body, args := f.UnreadLine(), f.UnreadLine()
-	f.TextLine(args)
+	body := f.UnreadLine()
 	f.TextLine(testkit.NotCanonicalBase64(body))
 	f.HMAC()
 	f.Payload("age")

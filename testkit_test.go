@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build go1.18
+// +build go1.18
+
 package age_test
 
 import (
@@ -155,6 +158,9 @@ func testVector(t *testing.T, test []byte) {
 	if err != nil {
 		if expect == "payload failure" {
 			t.Log(err)
+			if payloadHash != nil && sha256.Sum256(out) != *payloadHash {
+				t.Error("partial payload hash mismatch")
+			}
 			return
 		}
 		t.Fatalf("expected %s, got: %v", expect, err)

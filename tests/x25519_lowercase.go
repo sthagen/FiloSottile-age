@@ -3,21 +3,18 @@
 // license that can be found in the LICENSE file.
 
 //go:build ignore
+// +build ignore
 
 package main
 
-import (
-	"strings"
-
-	"filippo.io/age/internal/testkit"
-)
+import "filippo.io/age/internal/testkit"
 
 func main() {
 	f := testkit.NewTestFile()
 	f.VersionLine("v1")
 	f.X25519(testkit.TestX25519Recipient)
-	body, args := f.UnreadLine(), f.UnreadLine()
-	f.TextLine(strings.Replace(args, "X25519", "x25519", -1))
+	body, args := f.UnreadLine(), f.UnreadArgsLine()
+	f.ArgsLine("x25519", args[1])
 	f.TextLine(body)
 	f.HMAC()
 	f.Payload("age")
