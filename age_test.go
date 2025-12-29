@@ -5,11 +5,15 @@
 package age_test
 
 import (
+	"archive/zip"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -189,6 +193,40 @@ func TestEncryptDecryptScrypt(t *testing.T) {
 	}
 }
 
+func ExampleDecryptReaderAt() {
+	identity, err := age.ParseX25519Identity(privateKey)
+	if err != nil {
+		log.Fatalf("Failed to parse private key: %v", err)
+	}
+
+	f, err := os.Open("testdata/example.zip.age")
+	if err != nil {
+		log.Fatalf("Failed to open file: %v", err)
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		log.Fatalf("Failed to stat file: %v", err)
+	}
+
+	r, size, err := age.DecryptReaderAt(f, stat.Size(), identity)
+	if err != nil {
+		log.Fatalf("Failed to open encrypted file: %v", err)
+	}
+
+	z, err := zip.NewReader(r, size)
+	if err != nil {
+		log.Fatalf("Failed to open zip: %v", err)
+	}
+	contents, err := fs.ReadFile(z, "example.txt")
+	if err != nil {
+		log.Fatalf("Failed to read file from zip: %v", err)
+	}
+
+	fmt.Printf("File contents: %q\n", contents)
+	// Output:
+	// File contents: "Black lives matter."
+}
+
 func TestParseIdentities(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -285,6 +323,163 @@ func TestLabels(t *testing.T) {
 	}
 }
 
+// testIdentity is a non-native identity that records if Unwrap is called.
+type testIdentity struct {
+	called bool
+}
+
+func (ti *testIdentity) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
+	ti.called = true
+	return nil, age.ErrIncorrectIdentity
+}
+
+func TestDecryptNativeIdentitiesFirst(t *testing.T) {
+	correct, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unrelated, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	buf := &bytes.Buffer{}
+	w, err := age.Encrypt(buf, correct.Recipient())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	nonNative := &testIdentity{}
+
+	// Pass identities: unrelated native, non-native, correct native.
+	// Native identities should be tried first, so correct should match
+	// before nonNative is ever called.
+	_, err = age.Decrypt(bytes.NewReader(buf.Bytes()), unrelated, nonNative, correct)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if nonNative.called {
+		t.Error("non-native identity was called, but native identities should be tried first")
+	}
+}
+
+type stanzaTypeRecipient string
+
+func (s stanzaTypeRecipient) Wrap(fileKey []byte) ([]*age.Stanza, error) {
+	return []*age.Stanza{{Type: string(s)}}, nil
+}
+
+func TestNoIdentityMatchErrorStanzaTypes(t *testing.T) {
+	a, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	buf := &bytes.Buffer{}
+	w, err := age.Encrypt(buf, a.Recipient(), stanzaTypeRecipient("other"), b.Recipient())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(w, helloWorld); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = age.Decrypt(bytes.NewReader(buf.Bytes()), wrong)
+	if err == nil {
+		t.Fatal("expected decryption to fail")
+	}
+
+	var noMatch *age.NoIdentityMatchError
+	if !errors.As(err, &noMatch) {
+		t.Fatalf("expected NoIdentityMatchError, got %T: %v", err, err)
+	}
+
+	want := []string{"X25519", "other", "X25519"}
+	if !slices.Equal(noMatch.StanzaTypes, want) {
+		t.Errorf("StanzaTypes = %v, want %v", noMatch.StanzaTypes, want)
+	}
+}
+
+func TestScryptIdentityErrors(t *testing.T) {
+	t.Run("not passphrase-encrypted", func(t *testing.T) {
+		i, err := age.GenerateX25519Identity()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		buf := &bytes.Buffer{}
+		w, err := age.Encrypt(buf, i.Recipient())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		scryptID, err := age.NewScryptIdentity("password")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = age.Decrypt(bytes.NewReader(buf.Bytes()), scryptID)
+		if err == nil {
+			t.Fatal("expected decryption to fail")
+		}
+		if !errors.Is(err, age.ErrIncorrectIdentity) {
+			t.Errorf("expected ErrIncorrectIdentity, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "not passphrase-encrypted") {
+			t.Errorf("expected error to mention 'not passphrase-encrypted', got %v", err)
+		}
+	})
+
+	t.Run("incorrect passphrase", func(t *testing.T) {
+		r, err := age.NewScryptRecipient("correct-password")
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.SetWorkFactor(10) // Low for fast test
+
+		buf := &bytes.Buffer{}
+		w, err := age.Encrypt(buf, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		scryptID, err := age.NewScryptIdentity("wrong-password")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = age.Decrypt(bytes.NewReader(buf.Bytes()), scryptID)
+		if err == nil {
+			t.Fatal("expected decryption to fail")
+		}
+		if !errors.Is(err, age.ErrIncorrectIdentity) {
+			t.Errorf("expected ErrIncorrectIdentity, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "incorrect passphrase") {
+			t.Errorf("expected error to mention 'incorrect passphrase', got %v", err)
+		}
+	})
+}
+
 func TestDetachedHeader(t *testing.T) {
 	i, err := age.GenerateX25519Identity()
 	if err != nil {
@@ -325,5 +520,32 @@ func TestDetachedHeader(t *testing.T) {
 	}
 	if string(outBytes) != helloWorld {
 		t.Errorf("wrong data: %q, expected %q", outBytes, helloWorld)
+	}
+}
+
+func TestEncryptReader(t *testing.T) {
+	a, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := age.EncryptReader(strings.NewReader(helloWorld), a.Recipient())
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := &bytes.Buffer{}
+	if _, err := io.Copy(buf, r); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := age.Decrypt(buf, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outBytes, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(outBytes) != helloWorld {
+		t.Errorf("wrong data: %q, excepted %q", outBytes, helloWorld)
 	}
 }

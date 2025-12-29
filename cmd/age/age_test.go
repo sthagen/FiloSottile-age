@@ -6,6 +6,9 @@ package main
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
+	"sync"
 	"testing"
 
 	"filippo.io/age"
@@ -14,22 +17,15 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Exit(testscript.RunMain(m, map[string]func() int{
-		"age": func() (exitCode int) {
-			testOnlyPanicInsteadOfExit = true
-			defer func() {
-				if testOnlyDidExit {
-					exitCode = recover().(int)
-				}
-			}()
+	testscript.Main(m, map[string]func(){
+		"age": func() {
 			testOnlyConfigureScryptIdentity = func(r *age.ScryptRecipient) {
 				r.SetWorkFactor(10)
 			}
 			testOnlyFixedRandomWord = "four"
 			main()
-			return 0
 		},
-		"age-plugin-test": func() (exitCode int) {
+		"age-plugin-test": func() {
 			p, _ := plugin.New("test")
 			p.HandleRecipient(func(data []byte) (age.Recipient, error) {
 				return testPlugin{}, nil
@@ -37,9 +33,9 @@ func TestMain(m *testing.M) {
 			p.HandleIdentity(func(data []byte) (age.Identity, error) {
 				return testPlugin{}, nil
 			})
-			return p.Main()
+			os.Exit(p.Main())
 		},
-	}))
+	})
 }
 
 type testPlugin struct{}
@@ -55,9 +51,27 @@ func (testPlugin) Unwrap(ss []*age.Stanza) ([]byte, error) {
 	return nil, age.ErrIncorrectIdentity
 }
 
+var buildExtraCommands = sync.OnceValue(func() error {
+	bindir := filepath.SplitList(os.Getenv("PATH"))[0]
+	// Build age-keygen and age-plugin-pq into the test binary directory.
+	cmd := exec.Command("go", "build", "-o", bindir)
+	if testing.CoverMode() != "" {
+		cmd.Args = append(cmd.Args, "-cover")
+	}
+	cmd.Args = append(cmd.Args, "filippo.io/age/cmd/age-keygen")
+	cmd.Args = append(cmd.Args, "filippo.io/age/extra/age-plugin-pq")
+	cmd.Args = append(cmd.Args, "filippo.io/age/cmd/age-plugin-batchpass")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+})
+
 func TestScript(t *testing.T) {
 	testscript.Run(t, testscript.Params{
 		Dir: "testdata",
+		Setup: func(e *testscript.Env) error {
+			return buildExtraCommands()
+		},
 		// TODO: enable AGEDEBUG=plugin without breaking stderr checks.
 	})
 }

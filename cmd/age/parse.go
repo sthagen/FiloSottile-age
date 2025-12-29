@@ -11,11 +11,14 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
 	"filippo.io/age/armor"
+	"filippo.io/age/internal/term"
 	"filippo.io/age/plugin"
+	"filippo.io/age/tag"
 	"golang.org/x/crypto/cryptobyte"
 	"golang.org/x/crypto/ssh"
 )
@@ -30,8 +33,12 @@ func (gitHubRecipientError) Error() string {
 
 func parseRecipient(arg string) (age.Recipient, error) {
 	switch {
+	case strings.HasPrefix(arg, "age1tag1") || strings.HasPrefix(arg, "age1tagpq1"):
+		return tag.ParseRecipient(arg)
+	case strings.HasPrefix(arg, "age1pq1"):
+		return age.ParseHybridRecipient(arg)
 	case strings.HasPrefix(arg, "age1") && strings.Count(arg, "1") > 1:
-		return plugin.NewRecipient(arg, pluginTerminalUI)
+		return plugin.NewRecipient(arg, plugin.NewTerminalUI(printf, warningf))
 	case strings.HasPrefix(arg, "age1"):
 		return age.ParseX25519Recipient(arg)
 	case strings.HasPrefix(arg, "ssh-"):
@@ -72,6 +79,9 @@ func parseRecipientsFile(name string) ([]age.Recipient, error) {
 		if strings.HasPrefix(line, "#") || line == "" {
 			continue
 		}
+		if !utf8.ValidString(line) {
+			return nil, fmt.Errorf("%q: recipients file is not valid UTF-8", name)
+		}
 		if len(line) > lineLengthLimit {
 			return nil, fmt.Errorf("%q: line %d is too long", name, n)
 		}
@@ -81,6 +91,9 @@ func parseRecipientsFile(name string) ([]age.Recipient, error) {
 				// Skip unsupported but valid SSH public keys with a warning.
 				warningf("recipients file %q: ignoring unsupported SSH key of type %q at line %d", name, t, n)
 				continue
+			}
+			if strings.HasPrefix(line, "AGE-") {
+				return nil, fmt.Errorf("%q: error at line %d: apparent identity found in recipients file", name, n)
 			}
 			// Hide the error since it might unintentionally leak the contents
 			// of confidential files.
@@ -121,8 +134,9 @@ func sshKeyType(s string) (string, bool) {
 }
 
 // parseIdentitiesFile parses a file that contains age or SSH keys. It returns
-// one or more of *age.X25519Identity, *agessh.RSAIdentity, *agessh.Ed25519Identity,
-// *agessh.EncryptedSSHIdentity, or *EncryptedIdentity.
+// one or more of *[age.X25519Identity], *[age.HybridIdentity],
+// *[agessh.RSAIdentity], *[agessh.Ed25519Identity],
+// *[agessh.EncryptedSSHIdentity], or *[EncryptedIdentity].
 func parseIdentitiesFile(name string) ([]age.Identity, error) {
 	var f *os.File
 	if name == "-" {
@@ -162,7 +176,7 @@ func parseIdentitiesFile(name string) ([]age.Identity, error) {
 		return []age.Identity{&EncryptedIdentity{
 			Contents: contents,
 			Passphrase: func() (string, error) {
-				pass, err := readSecret(fmt.Sprintf("Enter passphrase for identity file %q:", name))
+				pass, err := term.ReadSecret(fmt.Sprintf("Enter passphrase for identity file %q:", name))
 				if err != nil {
 					return "", fmt.Errorf("could not read passphrase: %v", err)
 				}
@@ -198,15 +212,17 @@ func parseIdentitiesFile(name string) ([]age.Identity, error) {
 func parseIdentity(s string) (age.Identity, error) {
 	switch {
 	case strings.HasPrefix(s, "AGE-PLUGIN-"):
-		return plugin.NewIdentity(s, pluginTerminalUI)
+		return plugin.NewIdentity(s, plugin.NewTerminalUI(printf, warningf))
 	case strings.HasPrefix(s, "AGE-SECRET-KEY-1"):
 		return age.ParseX25519Identity(s)
+	case strings.HasPrefix(s, "AGE-SECRET-KEY-PQ-1"):
+		return age.ParseHybridIdentity(s)
 	default:
 		return nil, fmt.Errorf("unknown identity type")
 	}
 }
 
-// parseIdentities is like age.ParseIdentities, but supports plugin identities.
+// parseIdentities is like [age.ParseIdentities], but supports plugin identities.
 func parseIdentities(f io.Reader) ([]age.Identity, error) {
 	const privateKeySizeLimit = 1 << 24 // 16 MiB
 	var ids []age.Identity
@@ -218,19 +234,23 @@ func parseIdentities(f io.Reader) ([]age.Identity, error) {
 		if strings.HasPrefix(line, "#") || line == "" {
 			continue
 		}
-
+		if !utf8.ValidString(line) {
+			return nil, fmt.Errorf("identities file is not valid UTF-8")
+		}
 		i, err := parseIdentity(line)
 		if err != nil {
+			if strings.HasPrefix(line, "age1") {
+				return nil, fmt.Errorf("error at line %d: apparent recipient found in identities file", n)
+			}
 			return nil, fmt.Errorf("error at line %d: %v", n, err)
 		}
 		ids = append(ids, i)
-
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read secret keys file: %v", err)
+		return nil, fmt.Errorf("failed to read identities file: %v", err)
 	}
 	if len(ids) == 0 {
-		return nil, fmt.Errorf("no secret keys found")
+		return nil, fmt.Errorf("no identities found")
 	}
 	return ids, nil
 }
@@ -246,7 +266,7 @@ func parseSSHIdentity(name string, pemBytes []byte) ([]age.Identity, error) {
 			}
 		}
 		passphrasePrompt := func() ([]byte, error) {
-			pass, err := readSecret(fmt.Sprintf("Enter passphrase for %q:", name))
+			pass, err := term.ReadSecret(fmt.Sprintf("Enter passphrase for %q:", name))
 			if err != nil {
 				return nil, fmt.Errorf("could not read passphrase for %q: %v", name, err)
 			}

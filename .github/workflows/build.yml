@@ -16,29 +16,28 @@ jobs:
           - {GOOS: linux, GOARCH: amd64}
           - {GOOS: linux, GOARCH: arm, GOARM: 6}
           - {GOOS: linux, GOARCH: arm64}
-          - {GOOS: darwin, GOARCH: amd64}
           - {GOOS: darwin, GOARCH: arm64}
           - {GOOS: windows, GOARCH: amd64}
           - {GOOS: freebsd, GOARCH: amd64}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: 1.x
+          go-version-file: go.mod
+          cache: false
       - name: Build binary
         run: |
-          cp LICENSE "$RUNNER_TEMP/LICENSE"
-          echo -e "\n---\n" >> "$RUNNER_TEMP/LICENSE"
-          curl -L "https://go.dev/LICENSE?m=text" >> "$RUNNER_TEMP/LICENSE"
           VERSION="$(git describe --tags)"
           DIR="$(mktemp -d)"
           mkdir "$DIR/age"
-          cp "$RUNNER_TEMP/LICENSE" "$DIR/age"
           go build -o "$DIR/age" -trimpath ./cmd/...
+          cp LICENSE "$DIR/age/LICENSE"
+          cat .github/workflows/LICENSE.suffix.txt >> "$DIR/age/LICENSE"
           if [ "$GOOS" == "windows" ]; then
             sudo apt-get update && sudo apt-get install -y osslsigncode
             if [ -n "${{ secrets.SIGN_PASS }}" ]; then
@@ -64,21 +63,59 @@ jobs:
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: age-binaries-${{ matrix.GOOS }}-${{ matrix.GOARCH }}
+          name: age-artifacts-${{ matrix.GOOS }}-${{ matrix.GOARCH }}
           path: age-*
+  source:
+    name: Package source code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Create source tarball
+        run: |
+          VERSION="$(git describe --tags)"
+          DIR="$(mktemp -d)"
+          mkdir "$DIR/age"
+          git archive --format=tar.gz HEAD | tar -xz -C "$DIR/age"
+          ( cd "$DIR/age"; go mod vendor )
+          for cmd in "$DIR"/age/{cmd,extra}/*; do
+            echo "package main" >> "$cmd/version.go"
+            echo "" >> "$cmd/version.go"
+            echo "func init() { Version = \"$VERSION\" }" >> "$cmd/version.go"
+          done
+          tar -cvzf "age-$VERSION-source.tar.gz" -C "$DIR" age
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: age-artifacts-source
+          path: age-*-source.tar.gz
   upload:
-    name: Upload release binaries
+    name: Upload and attest release artifacts
     if: github.event_name == 'release'
-    needs: build
+    needs: [build, source]
     permissions:
       contents: write
+      attestations: write
+      id-token: write
     runs-on: ubuntu-latest
     steps:
       - name: Download workflow artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: age-binaries-*
+          pattern: age-artifacts-*
           merge-multiple: true
+      - name: Generate artifacts attestation
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: age-*
       - name: Upload release artifacts
         run: gh release upload "$GITHUB_REF_NAME" age-*
         env:

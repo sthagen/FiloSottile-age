@@ -6,9 +6,9 @@
 // specification.
 //
 // For most use cases, use the [Encrypt] and [Decrypt] functions with
-// [X25519Recipient] and [X25519Identity]. If passphrase encryption is required, use
-// [ScryptRecipient] and [ScryptIdentity]. For compatibility with existing SSH keys
-// use the filippo.io/age/agessh package.
+// [HybridRecipient] and [HybridIdentity]. If passphrase encryption is
+// required, use [ScryptRecipient] and [ScryptIdentity]. For compatibility with
+// existing SSH keys use the filippo.io/age/agessh package.
 //
 // age encrypted files are binary and not malleable. For encoding them as text,
 // use the filippo.io/age/armor package.
@@ -26,13 +26,13 @@
 // There is no default path for age keys. Instead, they should be stored at
 // application-specific paths. The CLI supports files where private keys are
 // listed one per line, ignoring empty lines and lines starting with "#". These
-// files can be parsed with ParseIdentities.
+// files can be parsed with [ParseIdentities].
 //
 // When integrating age into a new system, it's recommended that you only
-// support X25519 keys, and not SSH keys. The latter are supported for manual
-// encryption operations. If you need to tie into existing key management
-// infrastructure, you might want to consider implementing your own Recipient
-// and Identity.
+// support native (X25519 and hybrid) keys, and not SSH keys. The latter are
+// supported for manual encryption operations. If you need to tie into existing
+// key management infrastructure, you might want to consider implementing your
+// own [Recipient] and [Identity].
 //
 // # Backwards compatibility
 //
@@ -52,6 +52,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 
 	"filippo.io/age/internal/format"
@@ -59,7 +60,7 @@ import (
 )
 
 // An Identity is passed to [Decrypt] to unwrap an opaque file key from a
-// recipient stanza. It can be for example a secret key like [X25519Identity], a
+// recipient stanza. It can be for example a secret key like [HybridIdentity], a
 // plugin, or a custom implementation.
 type Identity interface {
 	// Unwrap must return an error wrapping [ErrIncorrectIdentity] if none of
@@ -76,7 +77,7 @@ type Identity interface {
 var ErrIncorrectIdentity = errors.New("incorrect identity for recipient block")
 
 // A Recipient is passed to [Encrypt] to wrap an opaque file key to one or more
-// recipient stanza(s). It can be for example a public key like [X25519Recipient],
+// recipient stanza(s). It can be for example a public key like [HybridRecipient],
 // a plugin, or a custom implementation.
 type Recipient interface {
 	// Most age API users won't need to interact with this method directly, and
@@ -114,21 +115,9 @@ type Stanza struct {
 const fileKeySize = 16
 const streamNonceSize = 16
 
-// Encrypt encrypts a file to one or more recipients.
-//
-// Writes to the returned WriteCloser are encrypted and written to dst as an age
-// file. Every recipient will be able to decrypt the file.
-//
-// The caller must call Close on the WriteCloser when done for the last chunk to
-// be encrypted and flushed to dst.
-func Encrypt(dst io.Writer, recipients ...Recipient) (io.WriteCloser, error) {
+func encryptHdr(fileKey []byte, recipients ...Recipient) (*format.Header, error) {
 	if len(recipients) == 0 {
 		return nil, errors.New("no recipients specified")
-	}
-
-	fileKey := make([]byte, fileKeySize)
-	if _, err := rand.Read(fileKey); err != nil {
-		return nil, err
 	}
 
 	hdr := &format.Header{}
@@ -136,13 +125,13 @@ func Encrypt(dst io.Writer, recipients ...Recipient) (io.WriteCloser, error) {
 	for i, r := range recipients {
 		stanzas, l, err := wrapWithLabels(r, fileKey)
 		if err != nil {
-			return nil, fmt.Errorf("failed to wrap key for recipient #%d: %v", i, err)
+			return nil, fmt.Errorf("failed to wrap key for recipient #%d: %w", i, err)
 		}
 		sort.Strings(l)
 		if i == 0 {
 			labels = l
 		} else if !slicesEqual(labels, l) {
-			return nil, fmt.Errorf("incompatible recipients")
+			return nil, incompatibleLabelsError(labels, l)
 		}
 		for _, s := range stanzas {
 			hdr.Recipients = append(hdr.Recipients, (*format.Stanza)(s))
@@ -153,19 +142,62 @@ func Encrypt(dst io.Writer, recipients ...Recipient) (io.WriteCloser, error) {
 	} else {
 		hdr.MAC = mac
 	}
+	return hdr, nil
+}
+
+// Encrypt encrypts a file to one or more recipients. Every recipient will be
+// able to decrypt the file.
+//
+// Writes to the returned WriteCloser are encrypted and written to dst as an age
+// file. The caller must call Close on the WriteCloser when done for the last
+// chunk to be encrypted and flushed to dst.
+func Encrypt(dst io.Writer, recipients ...Recipient) (io.WriteCloser, error) {
+	fileKey := make([]byte, fileKeySize)
+	rand.Read(fileKey)
+
+	hdr, err := encryptHdr(fileKey, recipients...)
+	if err != nil {
+		return nil, err
+	}
 	if err := hdr.Marshal(dst); err != nil {
-		return nil, fmt.Errorf("failed to write header: %v", err)
+		return nil, fmt.Errorf("failed to write header: %w", err)
 	}
 
 	nonce := make([]byte, streamNonceSize)
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
+	rand.Read(nonce)
 	if _, err := dst.Write(nonce); err != nil {
-		return nil, fmt.Errorf("failed to write nonce: %v", err)
+		return nil, fmt.Errorf("failed to write nonce: %w", err)
 	}
 
-	return stream.NewWriter(streamKey(fileKey, nonce), dst)
+	return stream.NewEncryptWriter(streamKey(fileKey, nonce), dst)
+}
+
+// EncryptReader encrypts a file to one or more recipients. Every recipient will be
+// able to decrypt the file.
+//
+// Reads from the returned Reader produce the encrypted file, where the plaintext
+// is read from src.
+func EncryptReader(src io.Reader, recipients ...Recipient) (io.Reader, error) {
+	fileKey := make([]byte, fileKeySize)
+	rand.Read(fileKey)
+
+	hdr, err := encryptHdr(fileKey, recipients...)
+	if err != nil {
+		return nil, err
+	}
+	buf := &bytes.Buffer{}
+	if err := hdr.Marshal(buf); err != nil {
+		return nil, fmt.Errorf("failed to prepare header: %w", err)
+	}
+
+	nonce := make([]byte, streamNonceSize)
+	rand.Read(nonce)
+
+	r, err := stream.NewEncryptReader(streamKey(fileKey, nonce), src)
+	if err != nil {
+		return nil, err
+	}
+	return io.MultiReader(buf, bytes.NewReader(nonce), r), nil
 }
 
 func wrapWithLabels(r Recipient, fileKey []byte) (s []*Stanza, labels []string, err error) {
@@ -188,25 +220,44 @@ func slicesEqual(s1, s2 []string) bool {
 	return true
 }
 
+func incompatibleLabelsError(l1, l2 []string) error {
+	hasPQ1 := slices.Contains(l1, "postquantum")
+	hasPQ2 := slices.Contains(l2, "postquantum")
+	if hasPQ1 != hasPQ2 {
+		return fmt.Errorf("incompatible recipients: can't mix post-quantum and classic recipients, or the file would be vulnerable to quantum computers")
+	}
+	return fmt.Errorf("incompatible recipients: %q and %q can't be mixed", l1, l2)
+}
+
 // NoIdentityMatchError is returned by [Decrypt] when none of the supplied
 // identities match the encrypted file.
 type NoIdentityMatchError struct {
 	// Errors is a slice of all the errors returned to Decrypt by the Unwrap
 	// calls it made. They all wrap [ErrIncorrectIdentity].
 	Errors []error
+	// StanzaTypes are the first argument of each recipient stanza in the
+	// encrypted file's header.
+	StanzaTypes []string
 }
 
-func (*NoIdentityMatchError) Error() string {
+func (e *NoIdentityMatchError) Error() string {
+	if len(e.Errors) == 1 {
+		return "identity did not match any of the recipients: " + e.Errors[0].Error()
+	}
 	return "no identity matched any of the recipients"
 }
 
+func (e *NoIdentityMatchError) Unwrap() []error {
+	return e.Errors
+}
+
 // Decrypt decrypts a file encrypted to one or more identities.
+// All identities will be tried until one successfully decrypts the file.
+// Native, non-interactive identities are tried before any other identities.
 //
-// It returns a Reader reading the decrypted plaintext of the age file read
-// from src. All identities will be tried until one successfully decrypts the file.
-//
-// If no identity matches the encrypted file, the returned error will be of type
-// [NoIdentityMatchError].
+// Decrypt returns a Reader reading the decrypted plaintext of the age file read
+// from src. If no identity matches the encrypted file, the returned error will
+// be of type [NoIdentityMatchError].
 func Decrypt(src io.Reader, identities ...Identity) (io.Reader, error) {
 	hdr, payload, err := format.Parse(src)
 	if err != nil {
@@ -223,19 +274,90 @@ func Decrypt(src io.Reader, identities ...Identity) (io.Reader, error) {
 		return nil, fmt.Errorf("failed to read nonce: %w", err)
 	}
 
-	return stream.NewReader(streamKey(fileKey, nonce), payload)
+	return stream.NewDecryptReader(streamKey(fileKey, nonce), payload)
+}
+
+// DecryptReaderAt decrypts a file encrypted to one or more identities.
+// All identities will be tried until one successfully decrypts the file.
+// Native, non-interactive identities are tried before any other identities.
+//
+// DecryptReaderAt takes an underlying [io.ReaderAt] and its total encrypted
+// size, and returns a ReaderAt of the decrypted plaintext and the plaintext
+// size. These can be used for example to instantiate an [io.SectionReader],
+// which implements [io.Reader] and [io.Seeker], or for [zip.NewReader].
+// Note that ReaderAt by definition disregards the seek position of src.
+//
+// The ReadAt method of the returned ReaderAt can be called concurrently.
+// The ReaderAt will internally cache the most recently decrypted chunk.
+// DecryptReaderAt reads and decrypts the final chunk before returning,
+// to authenticate the plaintext size.
+//
+// If no identity matches the encrypted file, the returned error will be of
+// type [NoIdentityMatchError].
+func DecryptReaderAt(src io.ReaderAt, encryptedSize int64, identities ...Identity) (io.ReaderAt, int64, error) {
+	srcReader := io.NewSectionReader(src, 0, encryptedSize)
+	hdr, payload, err := format.Parse(srcReader)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to read header: %w", err)
+	}
+	buf := &bytes.Buffer{}
+	if err := hdr.Marshal(buf); err != nil {
+		return nil, 0, fmt.Errorf("failed to serialize header: %w", err)
+	}
+
+	fileKey, err := decryptHdr(hdr, identities...)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	nonce := make([]byte, streamNonceSize)
+	if _, err := io.ReadFull(payload, nonce); err != nil {
+		return nil, 0, fmt.Errorf("failed to read nonce: %w", err)
+	}
+
+	payloadOffset := int64(buf.Len()) + int64(len(nonce))
+	payloadSize := encryptedSize - payloadOffset
+	plaintextSize, err := stream.PlaintextSize(payloadSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	payloadReaderAt := io.NewSectionReader(src, payloadOffset, payloadSize)
+	r, err := stream.NewDecryptReaderAt(streamKey(fileKey, nonce), payloadReaderAt, payloadSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	return r, plaintextSize, nil
 }
 
 func decryptHdr(hdr *format.Header, identities ...Identity) ([]byte, error) {
 	if len(identities) == 0 {
 		return nil, errors.New("no identities specified")
 	}
+	slices.SortStableFunc(identities, func(a, b Identity) int {
+		var aIsNative, bIsNative bool
+		switch a.(type) {
+		case *X25519Identity, *HybridIdentity, *ScryptIdentity:
+			aIsNative = true
+		}
+		switch b.(type) {
+		case *X25519Identity, *HybridIdentity, *ScryptIdentity:
+			bIsNative = true
+		}
+		if aIsNative && !bIsNative {
+			return -1
+		}
+		if !aIsNative && bIsNative {
+			return 1
+		}
+		return 0
+	})
 
 	stanzas := make([]*Stanza, 0, len(hdr.Recipients))
+	errNoMatch := &NoIdentityMatchError{}
 	for _, s := range hdr.Recipients {
+		errNoMatch.StanzaTypes = append(errNoMatch.StanzaTypes, s.Type)
 		stanzas = append(stanzas, (*Stanza)(s))
 	}
-	errNoMatch := &NoIdentityMatchError{}
 	var fileKey []byte
 	for _, id := range identities {
 		var err error

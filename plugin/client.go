@@ -8,9 +8,11 @@ package plugin
 
 import (
 	"bufio"
+	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
-	"math/rand"
+	mathrand "math/rand/v2"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -75,7 +77,7 @@ func (r *Recipient) WrapWithLabels(fileKey []byte) (stanzas []*age.Stanza, label
 
 	conn, err := openClientConnection(r.name, "recipient-v1")
 	if err != nil {
-		return nil, nil, fmt.Errorf("couldn't start plugin: %v", err)
+		return nil, nil, fmt.Errorf("couldn't start plugin: %w", err)
 	}
 	defer conn.Close()
 
@@ -228,7 +230,7 @@ func (i *Identity) Unwrap(stanzas []*age.Stanza) (fileKey []byte, err error) {
 
 	conn, err := openClientConnection(i.name, "identity-v1")
 	if err != nil {
-		return nil, fmt.Errorf("couldn't start plugin: %v", err)
+		return nil, fmt.Errorf("couldn't start plugin: %w", err)
 	}
 	defer conn.Close()
 
@@ -401,6 +403,24 @@ type clientConnection struct {
 	close     func()
 }
 
+// NotFoundError is returned by [Recipient.Wrap] and [Identity.Unwrap] when the
+// plugin binary cannot be found.
+type NotFoundError struct {
+	// Name is the plugin (not binary) name.
+	Name string
+	// Err is the underlying error, usually an [exec.Error] wrapping
+	// [exec.ErrNotFound].
+	Err error
+}
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("%q plugin not found: %v", e.Name, e.Err)
+}
+
+func (e *NotFoundError) Unwrap() error {
+	return e.Err
+}
+
 var testOnlyPluginPath string
 
 func openClientConnection(name, protocol string) (*clientConnection, error) {
@@ -443,6 +463,9 @@ func openClientConnection(name, protocol string) (*clientConnection, error) {
 	cmd.Dir = os.TempDir()
 
 	if err := cmd.Start(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return nil, &NotFoundError{Name: name, Err: err}
+		}
 		return nil, err
 	}
 
@@ -468,15 +491,15 @@ func writeStanzaWithBody(conn io.Writer, t string, body []byte) error {
 }
 
 func writeGrease(conn io.Writer) (sent bool, err error) {
-	if rand.Intn(3) == 0 {
+	if mathrand.IntN(3) == 0 {
 		return false, nil
 	}
-	s := &format.Stanza{Type: fmt.Sprintf("grease-%x", rand.Int())}
-	for i := 0; i < rand.Intn(3); i++ {
-		s.Args = append(s.Args, fmt.Sprintf("%d", rand.Intn(100)))
+	s := &format.Stanza{Type: fmt.Sprintf("grease-%x", mathrand.Int())}
+	for i := 0; i < mathrand.IntN(3); i++ {
+		s.Args = append(s.Args, fmt.Sprintf("%d", mathrand.IntN(100)))
 	}
-	if rand.Intn(2) == 0 {
-		s.Body = make([]byte, rand.Intn(100))
+	if mathrand.IntN(2) == 0 {
+		s.Body = make([]byte, mathrand.IntN(100))
 		rand.Read(s.Body)
 	}
 	return true, s.Marshal(conn)

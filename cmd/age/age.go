@@ -7,20 +7,24 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"iter"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strings"
+	"unicode"
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
 	"filippo.io/age/armor"
+	"filippo.io/age/internal/term"
 	"filippo.io/age/plugin"
-	"golang.org/x/term"
 )
 
 const usage = `Usage:
@@ -94,12 +98,16 @@ func (f *identityFlags) addPluginFlag(value string) error {
 	return nil
 }
 
+// Version can be set at link time to override debug.BuildInfo.Main.Version when
+// building manually without git history. It should look like "v1.2.3".
+var Version string
+
 func main() {
 	flag.Usage = func() { fmt.Fprintf(os.Stderr, "%s\n", usage) }
 
 	if len(os.Args) == 1 {
 		flag.Usage()
-		exit(1)
+		os.Exit(1)
 	}
 
 	var (
@@ -132,13 +140,10 @@ func main() {
 	flag.Parse()
 
 	if versionFlag {
-		if buildInfo, ok := debug.ReadBuildInfo(); ok {
-			// TODO: use buildInfo.Settings to prepare a pseudoversion such as
-			// v0.0.0-20210817164053-32db794688a5+dirty on Go 1.18+.
-			fmt.Println(buildInfo.Main.Version)
-			return
+		if buildInfo, ok := debug.ReadBuildInfo(); ok && Version == "" {
+			Version = buildInfo.Main.Version
 		}
-		fmt.Println("(unknown)")
+		fmt.Println(Version)
 		return
 	}
 
@@ -153,11 +158,8 @@ func main() {
 
 			safe := true
 			unsafeShell := regexp.MustCompile(`[^\w@%+=:,./-]`)
-			for _, arg := range os.Args {
-				if unsafeShell.MatchString(arg) {
-					safe = false
-					break
-				}
+			if slices.ContainsFunc(os.Args, unsafeShell.MatchString) {
+				safe = false
 			}
 			if safe {
 				i := len(os.Args) - flag.NArg()
@@ -215,6 +217,16 @@ func main() {
 		}
 	}
 
+	warnDuplicates(slices.Values(recipientFlags), "recipient")
+	warnDuplicates(slices.Values(recipientsFileFlags), "recipients file")
+	warnDuplicates(func(yield func(string) bool) {
+		for _, f := range identityFlags {
+			if f.Type == "i" && !yield(f.Value) {
+				return
+			}
+		}
+	}, "identity file")
+
 	var inUseFiles []string
 	for _, i := range identityFlags {
 		if i.Type != "i" {
@@ -238,7 +250,7 @@ func main() {
 		in = f
 	} else {
 		stdinInUse = true
-		if decryptFlag && term.IsTerminal(int(os.Stdin.Fd())) {
+		if decryptFlag && term.IsTerminal(os.Stdin) {
 			// If the input comes from a TTY, assume it's armored, and buffer up
 			// to the END line (or EOF/EOT) so that a password prompt or the
 			// output don't get in the way of typing the input. See Issue 364.
@@ -262,10 +274,25 @@ func main() {
 			}
 		}()
 		out = f
-	} else if term.IsTerminal(int(os.Stdout.Fd())) {
+	} else if term.IsTerminal(os.Stdout) {
+		buf := &bytes.Buffer{}
+		defer func() {
+			if out == buf {
+				io.Copy(os.Stdout, buf)
+			}
+		}()
 		if name != "-" {
 			if decryptFlag {
-				// TODO: buffer the output and check it's printable.
+				// Buffer the output to check it's printable.
+				out = buf
+				defer func() {
+					if bytes.ContainsFunc(buf.Bytes(), func(r rune) bool {
+						return r != '\n' && r != '\r' && r != '\t' && unicode.IsControl(r)
+					}) {
+						errorWithHint("refusing to output binary to the terminal",
+							`force anyway with "-o -"`)
+					}
+				}()
 			} else if !armorFlag {
 				// If the output wouldn't be armored, refuse to send binary to
 				// the terminal unless explicitly requested with "-o -".
@@ -274,11 +301,9 @@ func main() {
 					`force anyway with "-o -"`)
 			}
 		}
-		if in == os.Stdin && term.IsTerminal(int(os.Stdin.Fd())) {
+		if in == os.Stdin && term.IsTerminal(os.Stdin) {
 			// If the input comes from a TTY and output will go to a TTY,
 			// buffer it up so it doesn't get in the way of typing the input.
-			buf := &bytes.Buffer{}
-			defer func() { io.Copy(os.Stdout, buf) }()
 			out = buf
 		}
 	}
@@ -296,14 +321,14 @@ func main() {
 }
 
 func passphrasePromptForEncryption() (string, error) {
-	pass, err := readSecret("Enter passphrase (leave empty to autogenerate a secure one):")
+	pass, err := term.ReadSecret("Enter passphrase (leave empty to autogenerate a secure one):")
 	if err != nil {
 		return "", fmt.Errorf("could not read passphrase: %v", err)
 	}
 	p := string(pass)
 	if p == "" {
 		var words []string
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			words = append(words, randomWord())
 		}
 		p = strings.Join(words, "-")
@@ -312,7 +337,7 @@ func passphrasePromptForEncryption() (string, error) {
 			return "", fmt.Errorf("could not print passphrase: %v", err)
 		}
 	} else {
-		confirm, err := readSecret("Confirm passphrase:")
+		confirm, err := term.ReadSecret("Confirm passphrase:")
 		if err != nil {
 			return "", fmt.Errorf("could not read passphrase: %v", err)
 		}
@@ -357,7 +382,7 @@ func encryptNotPass(recs, files []string, identities identityFlags, in io.Reader
 			}
 			recipients = append(recipients, r...)
 		case "j":
-			id, err := plugin.NewIdentityWithoutData(f.Value, pluginTerminalUI)
+			id, err := plugin.NewIdentityWithoutData(f.Value, plugin.NewTerminalUI(printf, warningf))
 			if err != nil {
 				errorf("initializing %q: %v", f.Value, err)
 			}
@@ -394,7 +419,11 @@ func encrypt(recipients []age.Recipient, in io.Reader, out io.Writer, withArmor 
 		out = a
 	}
 	w, err := age.Encrypt(out, recipients...)
-	if err != nil {
+	if e := new(plugin.NotFoundError); errors.As(err, &e) {
+		errorWithHint(err.Error(),
+			fmt.Sprintf("you might want to install the %q plugin", e.Name),
+			"visit https://age-encryption.org/awesome#plugins for a list of available plugins")
+	} else if err != nil {
 		errorf("%v", err)
 	}
 	if _, err := io.Copy(w, in); err != nil {
@@ -423,8 +452,7 @@ func (rejectScryptIdentity) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
 }
 
 func decryptNotPass(flags identityFlags, in io.Reader, out io.Writer) {
-	identities := []age.Identity{rejectScryptIdentity{}}
-
+	var identities []age.Identity
 	for _, f := range flags {
 		switch f.Type {
 		case "i":
@@ -434,14 +462,14 @@ func decryptNotPass(flags identityFlags, in io.Reader, out io.Writer) {
 			}
 			identities = append(identities, ids...)
 		case "j":
-			id, err := plugin.NewIdentityWithoutData(f.Value, pluginTerminalUI)
+			id, err := plugin.NewIdentityWithoutData(f.Value, plugin.NewTerminalUI(printf, warningf))
 			if err != nil {
 				errorf("initializing %q: %v", f.Value, err)
 			}
 			identities = append(identities, id)
 		}
 	}
-
+	identities = append(identities, rejectScryptIdentity{})
 	decrypt(identities, in, out)
 }
 
@@ -449,7 +477,7 @@ func decryptPass(in io.Reader, out io.Writer) {
 	identities := []age.Identity{
 		// If there is an scrypt recipient (it will have to be the only one and)
 		// this identity will be invoked.
-		&LazyScryptIdentity{passphrasePromptForDecryption},
+		lazyScryptIdentity,
 	}
 
 	decrypt(identities, in, out)
@@ -464,14 +492,24 @@ func decrypt(identities []age.Identity, in io.Reader, out io.Writer) {
 			"consider using -o or -a to encrypt files in PowerShell")
 	}
 
-	if start, _ := rr.Peek(len(armor.Header)); string(start) == armor.Header {
+	const maxWhitespace = 1024
+	start, _ := rr.Peek(maxWhitespace + len(armor.Header))
+	if strings.HasPrefix(string(bytes.TrimSpace(start)), armor.Header) {
 		in = armor.NewReader(rr)
 	} else {
 		in = rr
 	}
 
 	r, err := age.Decrypt(in, identities...)
-	if err != nil {
+	if e := new(plugin.NotFoundError); errors.As(err, &e) {
+		errorWithHint(err.Error(),
+			fmt.Sprintf("you might want to install the %q plugin", e.Name),
+			"visit https://age-encryption.org/awesome#plugins for a list of available plugins")
+	} else if errors.As(err, new(*age.NoIdentityMatchError)) &&
+		len(identities) == 1 && identities[0] == lazyScryptIdentity {
+		errorWithHint("the file is not passphrase-encrypted, identities are required",
+			"specify identities with -i/--identity or -j to decrypt this file")
+	} else if err != nil {
 		errorf("%v", err)
 	}
 	out.Write(nil) // trigger the lazyOpener even if r is empty
@@ -480,8 +518,10 @@ func decrypt(identities []age.Identity, in io.Reader, out io.Writer) {
 	}
 }
 
+var lazyScryptIdentity = &LazyScryptIdentity{passphrasePromptForDecryption}
+
 func passphrasePromptForDecryption() (string, error) {
-	pass, err := readSecret("Enter passphrase:")
+	pass, err := term.ReadSecret("Enter passphrase:")
 	if err != nil {
 		return "", fmt.Errorf("could not read passphrase: %v", err)
 	}
@@ -493,6 +533,8 @@ func identitiesToRecipients(ids []age.Identity) ([]age.Recipient, error) {
 	for _, id := range ids {
 		switch id := id.(type) {
 		case *age.X25519Identity:
+			recipients = append(recipients, id.Recipient())
+		case *age.HybridIdentity:
 			recipients = append(recipients, id.Recipient())
 		case *plugin.Identity:
 			recipients = append(recipients, id.Recipient())
@@ -547,4 +589,16 @@ func absPath(name string) string {
 		return abs
 	}
 	return name
+}
+
+func warnDuplicates(s iter.Seq[string], name string) {
+	seen := make(map[string]bool)
+	warned := make(map[string]bool)
+	for e := range s {
+		if seen[e] && !warned[e] {
+			warningf("duplicate %s %q", name, e)
+			warned[e] = true
+		}
+		seen[e] = true
+	}
 }

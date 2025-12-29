@@ -18,15 +18,18 @@ import (
 )
 
 const usage = `Usage:
-    age-keygen [-o OUTPUT]
+    age-keygen [-pq] [-o OUTPUT]
     age-keygen -y [-o OUTPUT] [INPUT]
 
 Options:
+    -pq                       Generate a post-quantum hybrid ML-KEM-768 + X25519 key pair.
+                              (This might become the default in the future.)
     -o, --output OUTPUT       Write the result to the file at path OUTPUT.
     -y                        Convert an identity file to a recipients file.
 
-age-keygen generates a new native X25519 key pair, and outputs it to
-standard output or to the OUTPUT file.
+age-keygen generates a new native X25519 or, with the -pq flag, post-quantum
+hybrid ML-KEM-768 + X25519 key pair, and outputs it to standard output or to
+the OUTPUT file.
 
 If an OUTPUT file is specified, the public key is printed to standard error.
 If OUTPUT already exists, it is not overwritten.
@@ -42,39 +45,51 @@ Examples:
     # public key: age1lvyvwawkr0mcnnnncaghunadrqkmuf9e6507x9y920xxpp866cnql7dp2z
     AGE-SECRET-KEY-1N9JEPW6DWJ0ZQUDX63F5A03GX8QUW7PXDE39N8UYF82VZ9PC8UFS3M7XA9
 
+    $ age-keygen -pq
+    # created: 2025-11-17T12:15:17+01:00
+    # public key: age1pq1pd[... 1950 more characters ...]
+    AGE-SECRET-KEY-PQ-1XXC4XS9DXHZ6TREKQTT3XECY8VNNU7GJ83C3Y49D0GZ3ZUME4JWS6QC3EF
+
     $ age-keygen -o key.txt
     Public key: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
 
     $ age-keygen -y key.txt
     age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p`
 
+// Version can be set at link time to override debug.BuildInfo.Main.Version when
+// building manually without git history. It should look like "v1.2.3".
+var Version string
+
 func main() {
 	log.SetFlags(0)
 	flag.Usage = func() { fmt.Fprintf(os.Stderr, "%s\n", usage) }
 
-	var (
-		versionFlag, convertFlag bool
-		outFlag                  string
-	)
+	var outFlag string
+	var pqFlag, versionFlag, convertFlag bool
 
 	flag.BoolVar(&versionFlag, "version", false, "print the version")
+	flag.BoolVar(&pqFlag, "pq", false, "generate a post-quantum key pair")
 	flag.BoolVar(&convertFlag, "y", false, "convert identities to recipients")
 	flag.StringVar(&outFlag, "o", "", "output to `FILE` (default stdout)")
 	flag.StringVar(&outFlag, "output", "", "output to `FILE` (default stdout)")
 	flag.Parse()
+
+	if versionFlag {
+		if buildInfo, ok := debug.ReadBuildInfo(); ok && Version == "" {
+			Version = buildInfo.Main.Version
+		}
+		fmt.Println(Version)
+		return
+	}
+
 	if len(flag.Args()) != 0 && !convertFlag {
 		errorf("too many arguments")
 	}
 	if len(flag.Args()) > 1 && convertFlag {
 		errorf("too many arguments")
 	}
-	if versionFlag {
-		if buildInfo, ok := debug.ReadBuildInfo(); ok {
-			fmt.Println(buildInfo.Main.Version)
-			return
-		}
-		fmt.Println("(unknown)")
-		return
+	if pqFlag && convertFlag {
+		errorf("-pq cannot be used with -y")
 	}
 
 	out := os.Stdout
@@ -107,23 +122,36 @@ func main() {
 		if fi, err := out.Stat(); err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0004 != 0 {
 			warning("writing secret key to a world-readable file")
 		}
-		generate(out)
+		generate(out, pqFlag)
 	}
 }
 
-func generate(out *os.File) {
-	k, err := age.GenerateX25519Identity()
-	if err != nil {
-		errorf("internal error: %v", err)
+func generate(out *os.File, pq bool) {
+	var i age.Identity
+	var r age.Recipient
+	if pq {
+		k, err := age.GenerateHybridIdentity()
+		if err != nil {
+			errorf("internal error: %v", err)
+		}
+		i = k
+		r = k.Recipient()
+	} else {
+		k, err := age.GenerateX25519Identity()
+		if err != nil {
+			errorf("internal error: %v", err)
+		}
+		i = k
+		r = k.Recipient()
 	}
 
 	if !term.IsTerminal(int(out.Fd())) {
-		fmt.Fprintf(os.Stderr, "Public key: %s\n", k.Recipient())
+		fmt.Fprintf(os.Stderr, "Public key: %s\n", r)
 	}
 
 	fmt.Fprintf(out, "# created: %s\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(out, "# public key: %s\n", k.Recipient())
-	fmt.Fprintf(out, "%s\n", k)
+	fmt.Fprintf(out, "# public key: %s\n", r)
+	fmt.Fprintf(out, "%s\n", i)
 }
 
 func convert(in io.Reader, out io.Writer) {
@@ -135,15 +163,19 @@ func convert(in io.Reader, out io.Writer) {
 		errorf("no identities found in the input")
 	}
 	for _, id := range ids {
-		id, ok := id.(*age.X25519Identity)
-		if !ok {
+		switch id := id.(type) {
+		case *age.X25519Identity:
+			fmt.Fprintf(out, "%s\n", id.Recipient())
+		case *age.HybridIdentity:
+			fmt.Fprintf(out, "%s\n", id.Recipient())
+		default:
 			errorf("internal error: unexpected identity type: %T", id)
 		}
-		fmt.Fprintf(out, "%s\n", id.Recipient())
+
 	}
 }
 
-func errorf(format string, v ...interface{}) {
+func errorf(format string, v ...any) {
 	log.Printf("age-keygen: error: "+format, v...)
 	log.Fatalf("age-keygen: report unexpected or unhelpful errors at https://filippo.io/age/report")
 }
