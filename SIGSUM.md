@@ -29,13 +29,14 @@ Dear future me, to sign a new release and produce Sigsum proofs, run the followi
 ```
 VERSION=v1.3.1
 go install sigsum.org/sigsum-go/cmd/sigsum-verify@latest
-go install github.com/tillitis/tkey-ssh-agent/cmd/tkey-ssh-agent@latest
+go install github.com/tillitis/tkey-ssh-agent/cmd/tkey-ssh-agent@main
 tkey-ssh-agent --agent-socket tkey-ssh-agent.sock --uss
+passage -c other/tkey-ssh-sigsum-age
 SSH_AUTH_SOCK=tkey-ssh-agent.sock ssh-add -L > tkey-ssh-agent.pub
 passage other/sigsum-ratelimit > sigsum-ratelimit
-gh release download $VERSION --dir artifacts/
+gh release download $VERSION --repo FiloSottile/age --dir artifacts/
 SSH_AUTH_SOCK=tkey-ssh-agent.sock sigsum-submit -k tkey-ssh-agent.pub -P sigsum-generic-2025-1 -a sigsum-ratelimit -d filippo.io artifacts/*
-gh release upload $VERSION artifacts/*.proof
+gh release upload $VERSION --repo FiloSottile/age artifacts/*.proof
 ```
 
 In the future, we will move to reproducing the artifacts locally, and signing
