@@ -1,11 +1,56 @@
 package inspect
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
+	"filippo.io/age/internal/format"
 	"filippo.io/age/internal/stream"
 )
+
+// buildFile serializes a header with a single stanza of the given type,
+// followed by the minimal valid encrypted payload (a 16-byte stream nonce
+// and a single empty ChaCha20-Poly1305 chunk).
+func buildFile(t *testing.T, stanzaType string) []byte {
+	t.Helper()
+	hdr := &format.Header{
+		Recipients: []*format.Stanza{{Type: stanzaType}},
+		MAC:        make([]byte, 32),
+	}
+	buf := &bytes.Buffer{}
+	if err := hdr.Marshal(buf); err != nil {
+		t.Fatalf("Header.Marshal: %v", err)
+	}
+	// Append nonce (16 bytes) + poly1305 tag for empty chunk (16 bytes).
+	buf.Write(make([]byte, 16+16))
+	return buf.Bytes()
+}
+
+func TestInspectTagStanzas(t *testing.T) {
+	tests := []struct {
+		stanzaType string
+		want       string
+	}{
+		{stanzaType: "p256tag", want: "no"},
+		{stanzaType: "mlkem768p256tag", want: "yes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.stanzaType, func(t *testing.T) {
+			f := buildFile(t, tt.stanzaType)
+			md, err := Inspect(bytes.NewReader(f), int64(len(f)))
+			if err != nil {
+				t.Fatalf("Inspect: %v", err)
+			}
+			if got := md.Postquantum; got != tt.want {
+				t.Errorf("Postquantum = %q, want %q", got, tt.want)
+			}
+			if len(md.StanzaTypes) != 1 || md.StanzaTypes[0] != tt.stanzaType {
+				t.Errorf("StanzaTypes = %v, want [%q]", md.StanzaTypes, tt.stanzaType)
+			}
+		})
+	}
+}
 
 func TestStreamOverhead(t *testing.T) {
 	tests := []struct {

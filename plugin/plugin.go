@@ -1,6 +1,6 @@
 // Package plugin implements the age plugin protocol.
 //
-// [Recipient] and [Indentity] are plugin clients, that execute plugin binaries to
+// [Recipient] and [Identity] are plugin clients, that execute plugin binaries to
 // perform encryption and decryption operations.
 //
 // [Plugin] is a framework for writing age plugins, that exposes an [age.Recipient]
@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 
 	"filippo.io/age"
@@ -358,7 +359,7 @@ func wrapWithLabels(r age.Recipient, fileKey []byte) ([]*age.Stanza, []string, e
 }
 
 func checkLabels(ll, labels []string) error {
-	if !slicesEqual(ll, labels) {
+	if !slices.Equal(ll, labels) {
 		return fmt.Errorf("labels %q do not match previous recipients %q", ll, labels)
 	}
 	return nil
@@ -661,16 +662,4 @@ func (p *Plugin) writeError(args []string, err error) error {
 		return fmt.Errorf("%v", err)
 	}
 	return nil
-}
-
-func slicesEqual(s1, s2 []string) bool {
-	if len(s1) != len(s2) {
-		return false
-	}
-	for i := range s1 {
-		if s1[i] != s2[i] {
-			return false
-		}
-	}
-	return true
 }

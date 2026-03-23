@@ -21,7 +21,7 @@ type Metadata struct {
 		Header   int64 `json:"header"`
 		Armor    int64 `json:"armor"`
 		Overhead int64 `json:"overhead"`
-		// Currently, we don't do any padding, not MinPayload == MaxPayload and
+		// Currently, we don't do any padding, so MinPayload == MaxPayload and
 		// MinPadding == MaxPadding == 0, but that might change in the future.
 		MinPayload int64 `json:"min_payload"`
 		MaxPayload int64 `json:"max_payload"`
@@ -61,9 +61,9 @@ func Inspect(r io.Reader, fileSize int64) (*Metadata, error) {
 	for _, s := range hdr.Recipients {
 		data.StanzaTypes = append(data.StanzaTypes, s.Type)
 		switch s.Type {
-		case "X25519", "ssh-rsa", "ssh-ed25519", "age-encryption.org/p256tag", "piv-p256":
+		case "X25519", "ssh-rsa", "ssh-ed25519", "p256tag", "piv-p256":
 			data.Postquantum = "no"
-		case "mlkem768x25519", "scrypt", "age-encryption.org/mlkem768p256tag":
+		case "mlkem768x25519", "scrypt", "mlkem768p256tag":
 			if data.Postquantum != "no" {
 				data.Postquantum = "yes"
 			}

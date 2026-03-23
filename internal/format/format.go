@@ -76,6 +76,7 @@ func (w *WrappedBase64Encoder) writeWrapped(p []byte) (int, error) {
 	if w.buf.Len() != 0 {
 		panic("age: internal error: non-empty WrappedBase64Encoder.buf")
 	}
+	total := len(p)
 	for len(p) > 0 {
 		toWrite := min(ColumnsPerLine-(w.written%ColumnsPerLine), len(p))
 		n, _ := w.buf.Write(p[:toWrite])
@@ -91,7 +92,7 @@ func (w *WrappedBase64Encoder) writeWrapped(p []byte) (int, error) {
 		// are not recoverable anyway.
 		return 0, err
 	}
-	return len(p), nil
+	return total, nil
 }
 
 // LastLineIsEmpty returns whether the last output line was empty, either
