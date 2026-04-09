@@ -7,6 +7,7 @@
 </p>
 
 [![Go Reference](https://pkg.go.dev/badge/filippo.io/age.svg)](https://pkg.go.dev/filippo.io/age)
+[![Dependencies](https://badges.api.sourcespotter.com/deps?firstparty=filippo.io&package=filippo.io%2Fage)](https://sourcespotter.com/deps/?firstparty=filippo.io&package=filippo.io%2Fage)
 [![man page](<https://img.shields.io/badge/age(1)-man%20page-lightgrey>)](https://filippo.io/age/age.1)
 [![C2SP specification](https://img.shields.io/badge/%C2%A7%23-specification-blueviolet)](https://age-encryption.org/v1)
 
