@@ -3,6 +3,7 @@ package inspect
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"testing"
 
 	"filippo.io/age/internal/format"
@@ -49,6 +50,44 @@ func TestInspectTagStanzas(t *testing.T) {
 				t.Errorf("StanzaTypes = %v, want [%q]", md.StanzaTypes, tt.stanzaType)
 			}
 		})
+	}
+}
+
+// readAfterEOFReader returns io.EOF along with the last of its data, and then
+// more data from subsequent Reads, like a terminal that received Ctrl-D
+// followed by more input.
+type readAfterEOFReader struct {
+	data []byte
+	eof  bool
+}
+
+func (r *readAfterEOFReader) Read(p []byte) (int, error) {
+	if r.eof {
+		return copy(p, "\n"), nil
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	if len(r.data) == 0 {
+		r.eof = true
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+func TestInspectReadAfterEOF(t *testing.T) {
+	f := buildFile(t, "X25519")
+	r := &readAfterEOFReader{data: f}
+	md, err := Inspect(r, -1)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if md.Version != "age-encryption.org/v1" {
+		t.Errorf("Version = %q, want age-encryption.org/v1", md.Version)
+	}
+	// If the reads after EOF were counted towards the file size, the extra
+	// bytes would show up in the payload size.
+	if md.Sizes.MinPayload != 0 {
+		t.Errorf("MinPayload = %d, want 0", md.Sizes.MinPayload)
 	}
 }
 
