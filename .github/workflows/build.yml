@@ -19,6 +19,7 @@ jobs:
           - {GOOS: darwin, GOARCH: arm64}
           - {GOOS: darwin, GOARCH: amd64}
           - {GOOS: windows, GOARCH: amd64}
+          - {GOOS: windows, GOARCH: arm64}
           - {GOOS: freebsd, GOARCH: amd64}
     steps:
       - name: Checkout repository
