@@ -41,17 +41,6 @@ jobs:
           cp LICENSE "$DIR/age/LICENSE"
           cat .github/workflows/LICENSE.suffix.txt >> "$DIR/age/LICENSE"
           if [ "$GOOS" == "windows" ]; then
-            sudo apt-get update && sudo apt-get install -y osslsigncode
-            if [ -n "${{ secrets.SIGN_PASS }}" ]; then
-              for exe in "$DIR"/age/*.exe; do
-                /usr/bin/osslsigncode sign -t "http://timestamp.comodoca.com" \
-                  -certs .github/workflows/certs/uitacllc.crt \
-                  -key .github/workflows/certs/uitacllc.key \
-                  -pass "${{ secrets.SIGN_PASS }}" \
-                  -n age -in "$exe" -out "$exe.signed"
-                mv "$exe.signed" "$exe"
-              done
-            fi
             ( cd "$DIR"; zip age.zip -r age )
             mv "$DIR/age.zip" "age-$VERSION-$GOOS-$GOARCH.zip"
           else
