@@ -10,12 +10,40 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/pem"
+	"math/big"
 	"reflect"
 	"testing"
 
 	"filippo.io/age/agessh"
 	"golang.org/x/crypto/ssh"
 )
+
+func TestSSHRSAKeySize(t *testing.T) {
+	for _, bits := range []int{2041, 2047, 2048} {
+		n := new(big.Int).Lsh(big.NewInt(1), uint(bits-1))
+		n.SetBit(n, 0, 1)
+		pub, err := ssh.NewPublicKey(&rsa.PublicKey{N: n, E: 65537})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = agessh.NewRSARecipient(pub)
+		if rejected, want := err != nil, bits < 2048; rejected != want {
+			t.Errorf("%d-bit key: rejected = %v, want %v", bits, rejected, want)
+		}
+	}
+
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := agessh.NewRSAIdentity(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := id.Recipient().Wrap(make([]byte, 16)); err == nil {
+		t.Error("RSAIdentity.Recipient accepted a 1024-bit key")
+	}
+}
 
 func TestSSHRSARoundTrip(t *testing.T) {
 	pk, err := rsa.GenerateKey(rand.Reader, 2048)

@@ -63,13 +63,16 @@ func NewRSARecipient(pk ssh.PublicKey) (*RSARecipient, error) {
 	} else {
 		return nil, errors.New("pk does not implement ssh.CryptoPublicKey")
 	}
-	if r.pubKey.Size() < 2048/8 {
+	if r.pubKey.N.BitLen() < 2048 {
 		return nil, errors.New("RSA key size is too small")
 	}
 	return r, nil
 }
 
 func (r *RSARecipient) Wrap(fileKey []byte) ([]*age.Stanza, error) {
+	if r.pubKey.N.BitLen() < 2048 {
+		return nil, errors.New("RSA key size is too small")
+	}
 	l := &age.Stanza{
 		Type: "ssh-rsa",
 		Args: []string{sshFingerprint(r.sshKey)},
