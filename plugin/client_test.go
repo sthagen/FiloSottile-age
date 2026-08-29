@@ -7,6 +7,7 @@
 package plugin
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"io"
@@ -19,6 +20,7 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/internal/bech32"
+	"filippo.io/age/internal/format"
 )
 
 func TestMain(m *testing.M) {
@@ -101,6 +103,22 @@ func TestPluginNameCase(t *testing.T) {
 	}
 	if _, err := New("\u212a"); err == nil {
 		t.Error("New accepted a non-ASCII name")
+	}
+}
+
+func TestRequestValueEmpty(t *testing.T) {
+	p, err := New("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.SetIO(nil, io.Discard, io.Discard)
+	p.sr = format.NewStanzaReader(bufio.NewReader(strings.NewReader("-> ok\n\n")))
+	value, err := p.RequestValue("prompt", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != "" {
+		t.Errorf("value = %q", value)
 	}
 }
 

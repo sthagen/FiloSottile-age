@@ -537,7 +537,7 @@ func (p *Plugin) RequestValue(prompt string, secret bool) (string, error) {
 	if s.Type == "fail" {
 		return "", fmt.Errorf("client failed to request value")
 	}
-	if err := expectStanzaWithBody(s, 0); err != nil {
+	if err := expectStanzaWithAnyBody(s, 0); err != nil {
 		return "", p.fatalInteractf("%v", err)
 	}
 	return string(s.Body), nil
@@ -596,11 +596,18 @@ func expectStanzaWithNoBody(s *format.Stanza, wantArgs int) error {
 }
 
 func expectStanzaWithBody(s *format.Stanza, wantArgs int) error {
-	if len(s.Args) != wantArgs {
-		return fmt.Errorf("%s stanza has %d arguments, want %d", s.Type, len(s.Args), wantArgs)
+	if err := expectStanzaWithAnyBody(s, wantArgs); err != nil {
+		return err
 	}
 	if len(s.Body) == 0 {
 		return fmt.Errorf("%s stanza has 0 bytes of body, want >0", s.Type)
+	}
+	return nil
+}
+
+func expectStanzaWithAnyBody(s *format.Stanza, wantArgs int) error {
+	if len(s.Args) != wantArgs {
+		return fmt.Errorf("%s stanza has %d arguments, want %d", s.Type, len(s.Args), wantArgs)
 	}
 	return nil
 }
