@@ -71,7 +71,8 @@ func parseRecipientsFile(name string) ([]age.Recipient, error) {
 	const recipientFileSizeLimit = 16 << 20 // 16 MiB
 	const lineLengthLimit = 8 << 10         // 8 KiB, same as sshd(8)
 	var recs []age.Recipient
-	scanner := bufio.NewScanner(io.LimitReader(f, recipientFileSizeLimit))
+	lr := &io.LimitedReader{R: f, N: recipientFileSizeLimit + 1}
+	scanner := bufio.NewScanner(lr)
 	var n int
 	for scanner.Scan() {
 		n++
@@ -103,6 +104,9 @@ func parseRecipientsFile(name string) ([]age.Recipient, error) {
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("%q: failed to read recipients file: %v", name, err)
+	}
+	if lr.N == 0 {
+		return nil, fmt.Errorf("%q: recipients file is too long", name)
 	}
 	if len(recs) == 0 {
 		return nil, fmt.Errorf("%q: no recipients found", name)
@@ -226,7 +230,8 @@ func parseIdentity(s string) (age.Identity, error) {
 func parseIdentities(f io.Reader) ([]age.Identity, error) {
 	const privateKeySizeLimit = 1 << 24 // 16 MiB
 	var ids []age.Identity
-	scanner := bufio.NewScanner(io.LimitReader(f, privateKeySizeLimit))
+	lr := &io.LimitedReader{R: f, N: privateKeySizeLimit + 1}
+	scanner := bufio.NewScanner(lr)
 	var n int
 	for scanner.Scan() {
 		n++
@@ -248,6 +253,9 @@ func parseIdentities(f io.Reader) ([]age.Identity, error) {
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("failed to read identities file: %v", err)
+	}
+	if lr.N == 0 {
+		return nil, fmt.Errorf("identities file is too long")
 	}
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("no identities found")

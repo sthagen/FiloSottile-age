@@ -314,6 +314,59 @@ func TestParseErrorsDoNotIncludeLine(t *testing.T) {
 	}
 }
 
+func paddedFile(pad int, lines string) io.Reader {
+	const chunkSize = 1 << 16
+	chunk := strings.Repeat("#\n", chunkSize/2)
+	var readers []io.Reader
+	if pad%2 != 0 {
+		readers = append(readers, strings.NewReader("\n"))
+		pad--
+	}
+	for ; pad > chunkSize; pad -= chunkSize {
+		readers = append(readers, strings.NewReader(chunk))
+	}
+	return io.MultiReader(append(readers,
+		strings.NewReader(chunk[:pad]), strings.NewReader(lines))...)
+}
+
+func TestParseFileSizeLimit(t *testing.T) {
+	const sizeLimit = 1 << 24
+	const identity = "AGE-SECRET-KEY-1D6K0SGAX3NU66R4GYFZY0UQWCLM3UUSF3CXLW4KXZM342WQSJ82QKU59QJ\n"
+	const recipient = "age1cy0su9fwf3gf9mw868g5yut09p6nytfmmnktexz2ya5uqg9vl9sss4euqm\n"
+	tests := []struct {
+		name  string
+		entry string
+		parse func(io.Reader) (int, error)
+	}{
+		{"identities", identity, func(r io.Reader) (int, error) {
+			ids, err := age.ParseIdentities(r)
+			return len(ids), err
+		}},
+		{"recipients", recipient, func(r io.Reader) (int, error) {
+			recipients, err := age.ParseRecipients(r)
+			return len(recipients), err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+"/at limit", func(t *testing.T) {
+			r := paddedFile(sizeLimit-4*len(tt.entry), strings.Repeat(tt.entry, 4))
+			n, err := tt.parse(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n != 4 {
+				t.Errorf("got %d entries, want 4", n)
+			}
+		})
+		t.Run(tt.name+"/over limit", func(t *testing.T) {
+			r := paddedFile(sizeLimit-4*len(tt.entry), strings.Repeat(tt.entry, 8))
+			if _, err := tt.parse(r); err == nil {
+				t.Error("expected an error")
+			}
+		})
+	}
+}
+
 type testRecipient struct {
 	labels []string
 }
