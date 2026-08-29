@@ -11,11 +11,11 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
+	"io/fs"
 	"strings"
 	"testing"
 
+	agetest "c2sp.org/CCTV/age"
 	"filippo.io/age/internal/format"
 )
 
@@ -159,12 +159,12 @@ func TestParseLimits(t *testing.T) {
 }
 
 func FuzzMalleability(f *testing.F) {
-	tests, err := filepath.Glob("../../testdata/testkit/*")
+	tests, err := fs.ReadDir(agetest.Vectors, ".")
 	if err != nil {
 		f.Fatal(err)
 	}
 	for _, test := range tests {
-		contents, err := os.ReadFile(test)
+		contents, err := fs.ReadFile(agetest.Vectors, test.Name())
 		if err != nil {
 			f.Fatal(err)
 		}
@@ -173,6 +173,9 @@ func FuzzMalleability(f *testing.F) {
 			f.Fatal("testkit file without header")
 		}
 		f.Add(contents)
+	}
+	if len(tests) == 0 {
+		f.Fatal("no test vectors")
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
 		h, payload, err := format.Parse(bytes.NewReader(data))
