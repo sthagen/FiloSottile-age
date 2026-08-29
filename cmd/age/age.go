@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
@@ -295,7 +296,7 @@ func main() {
 				// Buffer the output to check it's printable.
 				out = buf
 				defer func() {
-					if bytes.ContainsFunc(buf.Bytes(), func(r rune) bool {
+					if !utf8.Valid(buf.Bytes()) || bytes.ContainsFunc(buf.Bytes(), func(r rune) bool {
 						return r != '\n' && r != '\r' && r != '\t' && unicode.IsControl(r)
 					}) {
 						errorWithHint("refusing to output binary to the terminal",
