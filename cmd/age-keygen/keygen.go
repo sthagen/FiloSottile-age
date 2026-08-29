@@ -92,6 +92,20 @@ func main() {
 		errorf("-pq cannot be used with -y")
 	}
 
+	var converted []byte
+	if convertFlag {
+		in := os.Stdin
+		if inFile := flag.Arg(0); inFile != "" && inFile != "-" {
+			f, err := os.Open(inFile)
+			if err != nil {
+				errorf("failed to open input file %q: %v", inFile, err)
+			}
+			defer f.Close()
+			in = f
+		}
+		converted = convert(in)
+	}
+
 	out := os.Stdout
 	if outFlag != "" {
 		f, err := os.OpenFile(outFlag, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
@@ -106,18 +120,8 @@ func main() {
 		out = f
 	}
 
-	in := os.Stdin
-	if inFile := flag.Arg(0); inFile != "" && inFile != "-" {
-		f, err := os.Open(inFile)
-		if err != nil {
-			errorf("failed to open input file %q: %v", inFile, err)
-		}
-		defer f.Close()
-		in = f
-	}
-
 	if convertFlag {
-		convert(in, out)
+		writef(out, "%s", converted)
 	} else {
 		if fi, err := out.Stat(); err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0004 != 0 {
 			warning("writing secret key to a world-readable file")
@@ -160,7 +164,7 @@ func writef(out io.Writer, format string, v ...any) {
 	}
 }
 
-func convert(in io.Reader, out io.Writer) {
+func convert(in io.Reader) []byte {
 	ids, err := age.ParseIdentities(in)
 	if err != nil {
 		errorf("failed to parse input: %v", err)
@@ -168,17 +172,19 @@ func convert(in io.Reader, out io.Writer) {
 	if len(ids) == 0 {
 		errorf("no identities found in the input")
 	}
+	var out []byte
 	for _, id := range ids {
 		switch id := id.(type) {
 		case *age.X25519Identity:
-			writef(out, "%s\n", id.Recipient())
+			out = append(out, id.Recipient().String()...)
 		case *age.HybridIdentity:
-			writef(out, "%s\n", id.Recipient())
+			out = append(out, id.Recipient().String()...)
 		default:
 			errorf("internal error: unexpected identity type: %T", id)
 		}
-
+		out = append(out, '\n')
 	}
+	return out
 }
 
 func errorf(format string, v ...any) {
