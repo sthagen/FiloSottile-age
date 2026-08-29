@@ -59,6 +59,48 @@ func TestSSHRSARoundTrip(t *testing.T) {
 	}
 }
 
+func TestSSHRSAFingerprintCollision(t *testing.T) {
+	targetKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetIdentity, err := agessh.NewRSAIdentity(targetKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherIdentity, err := agessh.NewRSAIdentity(otherKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fileKey := make([]byte, 16)
+	if _, err := rand.Read(fileKey); err != nil {
+		t.Fatal(err)
+	}
+	stanzas, err := targetIdentity.Recipient().Wrap(fileKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	collision, err := otherIdentity.Recipient().Wrap(make([]byte, 16))
+	if err != nil {
+		t.Fatal(err)
+	}
+	collision[0].Args[0] = stanzas[0].Args[0]
+
+	out, err := targetIdentity.Unwrap(append(collision, stanzas...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(fileKey, out) {
+		t.Errorf("invalid output: %x, expected %x", out, fileKey)
+	}
+}
+
 func TestSSHEd25519RoundTrip(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -97,6 +139,48 @@ func TestSSHEd25519RoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if !bytes.Equal(fileKey, out) {
+		t.Errorf("invalid output: %x, expected %x", out, fileKey)
+	}
+}
+
+func TestSSHEd25519FingerprintCollision(t *testing.T) {
+	_, targetKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetIdentity, err := agessh.NewEd25519Identity(targetKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, otherKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherIdentity, err := agessh.NewEd25519Identity(otherKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fileKey := make([]byte, 16)
+	if _, err := rand.Read(fileKey); err != nil {
+		t.Fatal(err)
+	}
+	stanzas, err := targetIdentity.Recipient().Wrap(fileKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	collision, err := otherIdentity.Recipient().Wrap(make([]byte, 16))
+	if err != nil {
+		t.Fatal(err)
+	}
+	collision[0].Args[0] = stanzas[0].Args[0]
+
+	out, err := targetIdentity.Unwrap(append(collision, stanzas...))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !bytes.Equal(fileKey, out) {
 		t.Errorf("invalid output: %x, expected %x", out, fileKey)
 	}

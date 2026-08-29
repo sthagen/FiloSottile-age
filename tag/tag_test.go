@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"filippo.io/age"
+	"filippo.io/age/internal/format"
 	"filippo.io/age/tag"
 	"filippo.io/age/tag/internal/tagtest"
 )
@@ -105,6 +106,67 @@ func TestHybridRoundTrip(t *testing.T) {
 
 	if !bytes.Equal(plaintext, out) {
 		t.Errorf("invalid output: %q, expected %q", out, plaintext)
+	}
+}
+
+func TestTagCollision(t *testing.T) {
+	tests := []struct {
+		name      string
+		identity  age.Identity
+		recipient *tag.Recipient
+		other     *tag.Recipient
+	}{
+		{
+			name:      "classic",
+			identity:  tagtest.NewClassicIdentity("target"),
+			recipient: tagtest.NewClassicIdentity("target").Recipient(),
+			other:     tagtest.NewClassicIdentity("other").Recipient(),
+		},
+		{
+			name:      "hybrid",
+			identity:  tagtest.NewHybridIdentity("target"),
+			recipient: tagtest.NewHybridIdentity("target").Recipient(),
+			other:     tagtest.NewHybridIdentity("other").Recipient(),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fileKey := bytes.Repeat([]byte{1}, 16)
+			stanzas, err := test.recipient.Wrap(fileKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			unrelated, err := test.other.Wrap(make([]byte, 16))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			collision := &age.Stanza{
+				Type: unrelated[0].Type,
+				Args: append([]string(nil), unrelated[0].Args...),
+				Body: append([]byte(nil), unrelated[0].Body...),
+			}
+			enc, err := format.DecodeString(collision.Args[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			collisionTag, err := test.recipient.Tag(enc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			collision.Args[0] = format.EncodeToString(collisionTag)
+
+			allStanzas := append(unrelated, collision)
+			allStanzas = append(allStanzas, stanzas...)
+			out, err := test.identity.Unwrap(allStanzas)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(fileKey, out) {
+				t.Errorf("invalid output: %x, expected %x", out, fileKey)
+			}
+		})
 	}
 }
 

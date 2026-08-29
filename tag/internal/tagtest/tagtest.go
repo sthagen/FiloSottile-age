@@ -74,14 +74,20 @@ func (i *ClassicIdentity) Unwrap(ss []*age.Stanza) ([]byte, error) {
 			return nil, fmt.Errorf("failed to compute tag: %v", err)
 		}
 		if subtle.ConstantTimeCompare(tagArg, expTag[:4]) != 1 {
-			return nil, age.ErrIncorrectIdentity
+			continue
 		}
 
 		r, err := hpke.NewRecipient(enc, i.k, hpke.HKDFSHA256(), hpke.ChaCha20Poly1305(), []byte("age-encryption.org/p256tag"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to unwrap file key: %v", err)
 		}
-		return r.Open(nil, s.Body)
+		fileKey, err := r.Open(nil, s.Body)
+		if err != nil {
+			// The tag is only a short hint, and might collide with the tag of a
+			// different recipient.
+			continue
+		}
+		return fileKey, nil
 	}
 	return nil, age.ErrIncorrectIdentity
 }
@@ -139,14 +145,20 @@ func (i *HybridIdentity) Unwrap(ss []*age.Stanza) ([]byte, error) {
 			return nil, fmt.Errorf("failed to compute tag: %v", err)
 		}
 		if subtle.ConstantTimeCompare(tagArg, expTag[:4]) != 1 {
-			return nil, age.ErrIncorrectIdentity
+			continue
 		}
 
 		r, err := hpke.NewRecipient(enc, i.k, hpke.HKDFSHA256(), hpke.ChaCha20Poly1305(), []byte("age-encryption.org/mlkem768p256tag"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to unwrap file key: %v", err)
 		}
-		return r.Open(nil, s.Body)
+		fileKey, err := r.Open(nil, s.Body)
+		if err != nil {
+			// The tag is only a short hint, and might collide with the tag of a
+			// different recipient.
+			continue
+		}
+		return fileKey, nil
 	}
 	return nil, age.ErrIncorrectIdentity
 }

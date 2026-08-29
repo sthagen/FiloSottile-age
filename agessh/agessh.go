@@ -129,7 +129,9 @@ func (i *RSAIdentity) unwrap(block *age.Stanza) ([]byte, error) {
 	fileKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, i.k,
 		block.Body, []byte(oaepLabel))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt file key: %v", err)
+		// The fingerprint is only a short hint, and might collide with the
+		// fingerprint of a different recipient.
+		return nil, age.ErrIncorrectIdentity
 	}
 	return fileKey, nil
 }
@@ -344,7 +346,9 @@ func (i *Ed25519Identity) unwrap(block *age.Stanza) ([]byte, error) {
 
 	fileKey, err := aeadDecrypt(wrappingKey, block.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt file key: %v", err)
+		// The fingerprint is only a short hint, and might collide with the
+		// fingerprint of a different recipient.
+		return nil, age.ErrIncorrectIdentity
 	}
 	return fileKey, nil
 }
