@@ -46,6 +46,16 @@ func TestStanzaMarshal(t *testing.T) {
 	}
 }
 
+func TestHeaderMarshalNoStanzas(t *testing.T) {
+	buf := &bytes.Buffer{}
+	if err := (&format.Header{}).Marshal(buf); err == nil {
+		t.Fatal("Marshal accepted a header with no stanzas")
+	}
+	if buf.Len() != 0 {
+		t.Errorf("Marshal wrote %d bytes", buf.Len())
+	}
+}
+
 func TestParseLimits(t *testing.T) {
 	const (
 		intro          = "age-encryption.org/v1\n"
@@ -93,6 +103,9 @@ func TestParseLimits(t *testing.T) {
 			return []byte(intro + strings.Repeat("-> test\n\n", stanzas) + footer)
 		}
 
+		if _, _, err := format.Parse(bytes.NewReader(makeHeader(0))); err == nil || !strings.Contains(err.Error(), "no recipient stanzas") {
+			t.Fatalf("unexpected zero-stanza error: %v", err)
+		}
 		if _, _, err := format.Parse(bytes.NewReader(makeHeader(1024))); err != nil {
 			t.Fatalf("header with 1024 stanzas was rejected: %v", err)
 		}

@@ -135,6 +135,9 @@ func (r *Stanza) Marshal(w io.Writer) error {
 }
 
 func (h *Header) MarshalWithoutMAC(w io.Writer) error {
+	if len(h.Recipients) == 0 {
+		return errors.New("no recipient stanzas")
+	}
 	if _, err := io.WriteString(w, intro); err != nil {
 		return err
 	}
@@ -347,6 +350,9 @@ func Parse(input io.Reader) (*Header, io.Reader, error) {
 			return nil, nil, fmt.Errorf("failed to parse header: %w", err)
 		}
 		h.Recipients = append(h.Recipients, s)
+	}
+	if len(h.Recipients) == 0 {
+		return nil, nil, errorf("no recipient stanzas")
 	}
 
 	// If input is a bufio.Reader, rr might be equal to input because

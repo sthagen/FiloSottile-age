@@ -380,6 +380,22 @@ func (t testRecipient) WrapWithLabels(fileKey []byte) (s []*age.Stanza, labels [
 	return []*age.Stanza{{Type: "test"}}, t.labels, nil
 }
 
+type emptyRecipient struct{}
+
+func (emptyRecipient) Wrap(fileKey []byte) ([]*age.Stanza, error) {
+	return nil, nil
+}
+
+func TestEmptyRecipient(t *testing.T) {
+	buf := &bytes.Buffer{}
+	if _, err := age.Encrypt(buf, emptyRecipient{}); err == nil {
+		t.Fatal("Encrypt accepted a recipient with no stanzas")
+	}
+	if buf.Len() != 0 {
+		t.Errorf("Encrypt wrote %d bytes", buf.Len())
+	}
+}
+
 func TestLabels(t *testing.T) {
 	scrypt, err := age.NewScryptRecipient("xxx")
 	if err != nil {
