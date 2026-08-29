@@ -67,6 +67,23 @@ func (testPQCRecipient) WrapWithLabels(fileKey []byte) ([]*age.Stanza, []string,
 	return []*age.Stanza{{Type: "test", Body: fileKey}}, []string{"postquantum"}, nil
 }
 
+func TestIdentityV1NegativeIndex(t *testing.T) {
+	p, err := New("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.HandleIdentity(func([]byte) (age.Identity, error) { return nil, nil })
+	stderr := &bytes.Buffer{}
+	p.SetIO(strings.NewReader("-> recipient-stanza -1 X25519\n\n"), io.Discard, stderr)
+	if code := p.IdentityV1(); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	want := "unexpected file index -1, previous was -1"
+	if got := stderr.String(); got != want {
+		t.Errorf("stderr = %q, want %q", got, want)
+	}
+}
+
 func TestLabels(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows support is TODO")

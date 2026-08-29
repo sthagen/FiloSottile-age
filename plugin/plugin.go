@@ -399,6 +399,9 @@ ReadLoop:
 			if err != nil {
 				return p.fatalf("failed to parse recipient-stanza stanza argument: %v", err)
 			}
+			if i < 0 {
+				return p.fatalf("unexpected file index %d, previous was %d", i, len(files)-1)
+			}
 			ss := &age.Stanza{Type: s.Args[1], Args: s.Args[2:], Body: s.Body}
 			switch i {
 			case len(files):
