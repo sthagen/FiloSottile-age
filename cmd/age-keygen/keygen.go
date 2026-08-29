@@ -149,9 +149,15 @@ func generate(out *os.File, pq bool) {
 		fmt.Fprintf(os.Stderr, "Public key: %s\n", r)
 	}
 
-	fmt.Fprintf(out, "# created: %s\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(out, "# public key: %s\n", r)
-	fmt.Fprintf(out, "%s\n", i)
+	writef(out, "# created: %s\n", time.Now().Format(time.RFC3339))
+	writef(out, "# public key: %s\n", r)
+	writef(out, "%s\n", i)
+}
+
+func writef(out io.Writer, format string, v ...any) {
+	if _, err := fmt.Fprintf(out, format, v...); err != nil {
+		errorf("failed to write output: %v", err)
+	}
 }
 
 func convert(in io.Reader, out io.Writer) {
@@ -165,9 +171,9 @@ func convert(in io.Reader, out io.Writer) {
 	for _, id := range ids {
 		switch id := id.(type) {
 		case *age.X25519Identity:
-			fmt.Fprintf(out, "%s\n", id.Recipient())
+			writef(out, "%s\n", id.Recipient())
 		case *age.HybridIdentity:
-			fmt.Fprintf(out, "%s\n", id.Recipient())
+			writef(out, "%s\n", id.Recipient())
 		default:
 			errorf("internal error: unexpected identity type: %T", id)
 		}
