@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"filippo.io/age"
+	"filippo.io/age/plugin"
 )
 
 func ExampleEncrypt() {
@@ -547,5 +548,32 @@ func TestEncryptReader(t *testing.T) {
 	}
 	if string(outBytes) != helloWorld {
 		t.Errorf("wrong data: %q, excepted %q", outBytes, helloWorld)
+	}
+}
+
+func TestParseUnicode(t *testing.T) {
+	// U+212A folds to "k", shrinking the data part below the checksum.
+	w := "AA3100AC" + string(rune(0x212A))
+	for _, tc := range []struct {
+		name string
+		fn   func(string) error
+	}{
+		{"age.ParseX25519Recipient", func(s string) error { _, err := age.ParseX25519Recipient(s); return err }},
+		{"age.ParseX25519Identity", func(s string) error { _, err := age.ParseX25519Identity(s); return err }},
+		{"age.ParseHybridRecipient", func(s string) error { _, err := age.ParseHybridRecipient(s); return err }},
+		{"age.ParseHybridIdentity", func(s string) error { _, err := age.ParseHybridIdentity(s); return err }},
+		{"plugin.ParseIdentity", func(s string) error { _, _, err := plugin.ParseIdentity(s); return err }},
+		{"plugin.ParseRecipient", func(s string) error { _, _, err := plugin.ParseRecipient(s); return err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%s panicked on malformed input: %v", tc.name, r)
+				}
+			}()
+			if err := tc.fn(w); err == nil {
+				t.Errorf("%s returned nil error, want error", tc.name)
+			}
+		})
 	}
 }

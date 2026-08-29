@@ -93,3 +93,23 @@ func TestBech32(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeShortDataPart(t *testing.T) {
+	kelvin := string(rune(0x212A))
+	for _, s := range []string{
+		"AA3100AC" + kelvin,
+		"BK1" + kelvin + "0JFM",
+		"AQM1KZCML",
+	} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Decode(%+q) panicked: %v", s, r)
+				}
+			}()
+			if _, _, err := bech32.Decode(s); err == nil {
+				t.Errorf("Decode(%+q) = nil error, want error", s)
+			}
+		}()
+	}
+}
