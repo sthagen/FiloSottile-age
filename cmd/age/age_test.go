@@ -117,6 +117,52 @@ func TestParseFileSizeLimit(t *testing.T) {
 	}
 }
 
+func TestUnsupportedSSHKey(t *testing.T) {
+	tests := []struct {
+		name, key, want string
+		ok              bool
+	}{
+		{
+			"truncated Ed25519",
+			"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH9pO5pz22JZEasoS2LEWWvJiUYI9M6l1uZc31FG",
+			"", false,
+		},
+		{
+			"type-only RSA",
+			"ssh-rsa AAAAB3NzaC1yc2E=",
+			"", false,
+		},
+		{
+			"small RSA",
+			"ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCxlfoYpG04TTnmjocggQZI5l0fjvaUMky1ZD5zwktDKAgBj441OAtFj/3m7Gujpxx/8w3jjJoUXVtU+NFbcC972ROpPI4aPq3OR5SmuuR5bCr6efeZlyAEMY/DmbkeUe1TrvdU3VMDGJAvEEzT1wzokKt9PiwbV2jNkdPjaG5LDQ==",
+			"ssh-rsa", true,
+		},
+		{
+			"invalid Ed25519 point",
+			"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+			"", false,
+		},
+		{
+			"unknown type",
+			"totally-not-a-key AAAAEXRvdGFsbHktbm90LWEta2V5",
+			"totally-not-a-key", true,
+		},
+		{
+			"ECDSA",
+			"ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBOSh0Qo5zaBE33EiJnxwIBuZml9Nt9rCfvGi++FniWSk8X/10EO4E7KMgqGLlkCTDNIcbuKcsgfMw1/tifB8aTc=",
+			"ecdsa-sha2-nistp256", true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := unsupportedSSHKey(tt.key)
+			if got != tt.want || ok != tt.ok {
+				t.Errorf("unsupportedSSHKey() = %q, %v; want %q, %v", got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
 var buildExtraCommands = sync.OnceValue(func() error {
 	bindir := filepath.SplitList(os.Getenv("PATH"))[0]
 	// Build age-keygen and age-plugin-pq into the test binary directory.

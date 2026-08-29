@@ -6,6 +6,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -88,7 +89,7 @@ func parseRecipientsFile(name string) ([]age.Recipient, error) {
 		}
 		r, err := parseRecipient(line)
 		if err != nil {
-			if t, ok := sshKeyType(line); ok {
+			if t, unsupported := unsupportedSSHKey(line); unsupported {
 				// Skip unsupported but valid SSH public keys with a warning.
 				warningf("recipients file %q: ignoring unsupported SSH key of type %q at line %d", name, t, n)
 				continue
@@ -114,7 +115,7 @@ func parseRecipientsFile(name string) ([]age.Recipient, error) {
 	return recs, nil
 }
 
-func sshKeyType(s string) (string, bool) {
+func unsupportedSSHKey(s string) (string, bool) {
 	// TODO: also ignore options? And maybe support multiple spaces and tabs as
 	// field separators like OpenSSH?
 	fields := strings.Split(s, " ")
@@ -132,7 +133,26 @@ func sshKeyType(s string) (string, bool) {
 		return "", false
 	}
 	if t := fields[0]; t == string(typeBytes) {
-		return t, true
+		switch t {
+		case "ssh-ed25519":
+			return "", false
+		case "ssh-rsa":
+			out, _, _, _, err := ssh.ParseAuthorizedKey([]byte(s))
+			if err != nil {
+				return "", false
+			}
+			cryptoKey, ok := out.(ssh.CryptoPublicKey)
+			if !ok {
+				return "", false
+			}
+			rsaKey, ok := cryptoKey.CryptoPublicKey().(*rsa.PublicKey)
+			if !ok {
+				return "", false
+			}
+			return t, rsaKey.N.BitLen() < 2048
+		default:
+			return t, true
+		}
 	}
 	return "", false
 }
