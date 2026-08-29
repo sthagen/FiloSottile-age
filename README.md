@@ -151,7 +151,7 @@ $ age --decrypt -i key.txt data.tar.gz.age > data.tar.gz
 On Windows, Linux, macOS, and FreeBSD you can use the pre-built binaries.
 
 - [https://dl.filippo.io/age/latest?for=linux/amd64](https://dl.filippo.io/age/latest?for=linux/amd64)
-- [https://dl.filippo.io/age/v1.3.1?for=darwin/arm64](https://dl.filippo.io/age/v1.3.1?for=darwin/arm64)
+- [https://dl.filippo.io/age/v1.3.2?for=darwin/arm64](https://dl.filippo.io/age/v1.3.2?for=darwin/arm64)
 - ...
 
 If you download the pre-built binaries, you can check their [Sigsum proofs](./SIGSUM.md).
