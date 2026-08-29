@@ -15,6 +15,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"filippo.io/age"
@@ -439,6 +440,83 @@ type testIdentity struct {
 func (ti *testIdentity) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
 	ti.called = true
 	return nil, age.ErrIncorrectIdentity
+}
+
+type noMatchIdentity int
+
+func (noMatchIdentity) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
+	return nil, age.ErrIncorrectIdentity
+}
+
+func TestDecryptDoesNotReorderIdentities(t *testing.T) {
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := &bytes.Buffer{}
+	w, err := age.Encrypt(buf, identity.Recipient())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	encrypted := buf.Bytes()
+	header, err := age.ExtractHeader(bytes.NewReader(encrypted))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		decrypt func([]age.Identity) error
+	}{
+		{"Decrypt", func(identities []age.Identity) error {
+			_, err := age.Decrypt(bytes.NewReader(encrypted), identities...)
+			return err
+		}},
+		{"DecryptReaderAt", func(identities []age.Identity) error {
+			_, _, err := age.DecryptReaderAt(bytes.NewReader(encrypted), int64(len(encrypted)), identities...)
+			return err
+		}},
+		{"DecryptHeader", func(identities []age.Identity) error {
+			_, err := age.DecryptHeader(header, identities...)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			identities := []age.Identity{noMatchIdentity(1), identity, noMatchIdentity(2)}
+			want := slices.Clone(identities)
+			if err := tt.decrypt(identities); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(identities, want) {
+				t.Error("identities were reordered")
+			}
+		})
+	}
+
+	t.Run("concurrent", func(t *testing.T) {
+		identities := []age.Identity{noMatchIdentity(1), identity, noMatchIdentity(2)}
+		want := slices.Clone(identities)
+		var wg sync.WaitGroup
+		for range 4 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for range 20 {
+					if _, err := age.Decrypt(bytes.NewReader(encrypted), identities...); err != nil {
+						t.Error(err)
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		if !slices.Equal(identities, want) {
+			t.Error("identities were reordered")
+		}
+	})
 }
 
 func TestDecryptNativeIdentitiesFirst(t *testing.T) {
