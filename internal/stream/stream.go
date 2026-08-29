@@ -359,6 +359,20 @@ type cachedChunk struct {
 	data []byte
 }
 
+func readFullAt(r io.ReaderAt, p []byte, off int64) error {
+	n, err := r.ReadAt(p, off)
+	switch {
+	case n == len(p) && errors.Is(err, io.EOF):
+		// io.ReaderAt implementations are allowed to return io.EOF when the
+		// read reaches the end of the source.
+		err = nil
+	case n < len(p) && (err == nil || errors.Is(err, io.EOF)):
+		// Incorrect io.ReaderAt implementation, or the source is short.
+		err = io.ErrUnexpectedEOF
+	}
+	return err
+}
+
 func NewDecryptReaderAt(key []byte, src io.ReaderAt, size int64) (*DecryptReaderAt, error) {
 	aead, err := chacha20poly1305.New(key)
 	if err != nil {
@@ -374,15 +388,7 @@ func NewDecryptReaderAt(key []byte, src io.ReaderAt, size int64) (*DecryptReader
 	finalChunkOff := finalChunkIndex * encChunkSize
 	finalChunkSize := size - finalChunkOff
 	finalChunk := make([]byte, finalChunkSize)
-	nn, err := src.ReadAt(finalChunk, finalChunkOff)
-	if err == io.EOF {
-		if int64(nn) != finalChunkSize {
-			err = io.ErrUnexpectedEOF
-		} else {
-			err = nil
-		}
-	}
-	if err != nil {
+	if err := readFullAt(src, finalChunk, finalChunkOff); err != nil {
 		return nil, fmt.Errorf("failed to read final chunk: %w", err)
 	}
 	nonce := nonceForChunk(finalChunkIndex)
@@ -420,21 +426,14 @@ func (r *DecryptReaderAt) ReadAt(p []byte, off int64) (n int, err error) {
 			plaintext = cached.data
 			cacheUpdate = nil
 		} else {
-			nn, err := r.src.ReadAt(chunk[:chunkSize], chunkOff)
-			if err == io.EOF {
-				if int64(nn) != chunkSize {
-					err = io.ErrUnexpectedEOF
-				} else {
-					err = nil
-				}
-			}
-			if err != nil {
+			if err := readFullAt(r.src, chunk[:chunkSize], chunkOff); err != nil {
 				return n, fmt.Errorf("failed to read chunk at offset %d: %w", chunkOff, err)
 			}
 			nonce := nonceForChunk(chunkIndex)
 			if chunkIndex == r.chunks-1 {
 				setLastChunkFlag(nonce)
 			}
+			var err error
 			plaintext, err = r.a.Open(chunk[:0], nonce[:], chunk[:chunkSize], nil)
 			if err != nil {
 				return n, fmt.Errorf("failed to decrypt and authenticate chunk at offset %d: %w", chunkOff, err)
