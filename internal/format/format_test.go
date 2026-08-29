@@ -44,6 +44,22 @@ func TestStanzaMarshal(t *testing.T) {
 	if exp := "-> test 1 2 3\nQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB\n\n"; buf.String() != exp {
 		t.Errorf("wrong 64 columns stanza encoding: expected %q, got %q", exp, buf.String())
 	}
+
+	for _, s := range []*format.Stanza{
+		{Type: ""},
+		{Type: "test", Args: []string{""}},
+		{Type: "test", Args: []string{"a b"}},
+		{Type: "test", Args: []string{"a\nb"}},
+		{Type: "test", Args: []string{"café"}},
+	} {
+		buf.Reset()
+		if err := s.Marshal(buf); err == nil {
+			t.Errorf("Marshal accepted type %q, args %q", s.Type, s.Args)
+		}
+		if buf.Len() != 0 {
+			t.Errorf("Marshal wrote %d bytes", buf.Len())
+		}
+	}
 }
 
 func TestHeaderMarshalNoStanzas(t *testing.T) {

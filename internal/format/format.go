@@ -109,6 +109,14 @@ var stanzaPrefix = []byte("->")
 var footerPrefix = []byte("---")
 
 func (r *Stanza) Marshal(w io.Writer) error {
+	if !isValidString(r.Type) {
+		return fmt.Errorf("invalid stanza type: %q", r.Type)
+	}
+	for _, a := range r.Args {
+		if !isValidString(a) {
+			return fmt.Errorf("invalid stanza argument: %q", a)
+		}
+	}
 	if _, err := w.Write(stanzaPrefix); err != nil {
 		return err
 	}
