@@ -112,7 +112,10 @@ func (r *Stanza) Marshal(w io.Writer) error {
 	if _, err := w.Write(stanzaPrefix); err != nil {
 		return err
 	}
-	for _, a := range append([]string{r.Type}, r.Args...) {
+	if _, err := io.WriteString(w, " "+r.Type); err != nil {
+		return err
+	}
+	for _, a := range r.Args {
 		if _, err := io.WriteString(w, " "+a); err != nil {
 			return err
 		}
@@ -154,7 +157,9 @@ func (h *Header) Marshal(w io.Writer) error {
 }
 
 type StanzaReader struct {
-	r   *bufio.Reader
+	r interface {
+		ReadBytes(delim byte) ([]byte, error)
+	}
 	err error
 }
 
@@ -181,11 +186,6 @@ func (r *StanzaReader) ReadStanza() (s *Stanza, err error) {
 	prefix, args := splitArgs(line)
 	if prefix != string(stanzaPrefix) || len(args) < 1 {
 		return nil, fmt.Errorf("malformed stanza: %q", line)
-	}
-	for _, a := range args {
-		if !isValidString(a) {
-			return nil, fmt.Errorf("malformed stanza: %q", line)
-		}
 	}
 	s.Type = args[0]
 	s.Args = args[1:]
@@ -218,6 +218,44 @@ type ParseError struct {
 	err error
 }
 
+const (
+	maxHeaderBytes      = 2 << 20
+	maxRecipientStanzas = 1024
+	maxStanzaArgs       = 128
+)
+
+type headerReader struct {
+	r *bufio.Reader
+	n int
+}
+
+func (r *headerReader) ReadBytes(delim byte) ([]byte, error) {
+	var line []byte
+	for {
+		frag, err := r.r.ReadSlice(delim)
+		if len(frag) > maxHeaderBytes-r.n {
+			return nil, errorf("header exceeds 2 MiB")
+		}
+		r.n += len(frag)
+		line = append(line, frag...)
+		if err != bufio.ErrBufferFull {
+			return line, err
+		}
+	}
+}
+
+func (r *headerReader) ReadString(delim byte) (string, error) {
+	line, err := r.ReadBytes(delim)
+	return string(line), err
+}
+
+func (r *headerReader) Peek(n int) ([]byte, error) {
+	if r.n+n > maxHeaderBytes {
+		return nil, errorf("header exceeds 2 MiB")
+	}
+	return r.r.Peek(n)
+}
+
 func (e *ParseError) Error() string {
 	return "parsing age header: " + e.err.Error()
 }
@@ -235,26 +273,35 @@ func errorf(format string, a ...any) error {
 func Parse(input io.Reader) (*Header, io.Reader, error) {
 	h := &Header{}
 	rr := bufio.NewReader(input)
+	hr := &headerReader{r: rr}
 
-	line, err := rr.ReadString('\n')
+	line, err := hr.ReadString('\n')
 	if err == io.EOF {
 		return nil, nil, errorf("file is empty")
 	} else if err != nil {
+		// headerReader errors are already ParseErrors; don't nest the prefix.
+		if _, ok := err.(*ParseError); ok {
+			return nil, nil, err
+		}
 		return nil, nil, errorf("failed to read intro: %w", err)
 	}
 	if line != intro {
 		return nil, nil, errorf("unexpected intro: %q", line)
 	}
 
-	sr := NewStanzaReader(rr)
+	sr := &StanzaReader{r: hr}
 	for {
-		peek, err := rr.Peek(len(footerPrefix))
+		peek, err := hr.Peek(len(footerPrefix))
 		if err != nil {
+			// headerReader errors are already ParseErrors; don't nest the prefix.
+			if _, ok := err.(*ParseError); ok {
+				return nil, nil, err
+			}
 			return nil, nil, errorf("failed to read header: %w", err)
 		}
 
 		if bytes.Equal(peek, footerPrefix) {
-			line, err := rr.ReadBytes('\n')
+			line, err := hr.ReadBytes('\n')
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to read header: %w", err)
 			}
@@ -268,6 +315,9 @@ func Parse(input io.Reader) (*Header, io.Reader, error) {
 				return nil, nil, errorf("malformed closing line %q: %v", line, err)
 			}
 			break
+		}
+		if len(h.Recipients) == maxRecipientStanzas {
+			return nil, nil, errorf("header contains more than %d recipient stanzas", maxRecipientStanzas)
 		}
 
 		s, err := sr.ReadStanza()
@@ -294,8 +344,19 @@ func Parse(input io.Reader) (*Header, io.Reader, error) {
 
 func splitArgs(line []byte) (string, []string) {
 	l := strings.TrimSuffix(string(line), "\n")
-	parts := strings.Split(l, " ")
-	return parts[0], parts[1:]
+	prefix, rest, ok := strings.Cut(l, " ")
+	if !ok {
+		return l, nil
+	}
+
+	var args []string
+	for arg := range strings.SplitSeq(rest, " ") {
+		if !isValidString(arg) || len(args) > maxStanzaArgs {
+			return l, nil
+		}
+		args = append(args, arg)
+	}
+	return prefix, args
 }
 
 func isValidString(s string) bool {
