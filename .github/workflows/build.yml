@@ -37,7 +37,7 @@ jobs:
           VERSION="$(git describe --tags)"
           DIR="$(mktemp -d)"
           mkdir "$DIR/age"
-          go build -o "$DIR/age" -trimpath ./cmd/...
+          go build -o "$DIR/age" -trimpath ./cmd/... ./extra/...
           cp LICENSE "$DIR/age/LICENSE"
           cat .github/workflows/LICENSE.suffix.txt >> "$DIR/age/LICENSE"
           if [ "$GOOS" == "windows" ]; then
