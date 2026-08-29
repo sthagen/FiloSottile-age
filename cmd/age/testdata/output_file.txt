@@ -25,6 +25,22 @@ age -d -i key.txt -o new empty.age
 ! stderr .
 cmp new empty
 
+# Don't create or truncate the output if the payload fails authentication.
+! age -o test.out -d -i key.txt corrupt.age
+stderr 'failed to decrypt and authenticate payload chunk'
+! exists test.out
+cp input existing
+! age -o existing -d -i key.txt corrupt.age
+stderr 'failed to decrypt and authenticate payload chunk'
+cmp existing input
+
+# Report output creation errors for an empty plaintext.
+! age -o missingdir/test.out -d -i key.txt empty.age
+stderr 'missingdir/test.out'
+! exists missingdir/test.out
+! age -o missingdir/test.out -d -i key.txt test.age
+stderr 'missingdir/test.out'
+
 # https://github.com/FiloSottile/age/issues/491
 cp input inputcopy
 ! age -r age1xmwwc06ly3ee5rytxm9mflaz2u56jjj36s0mypdrwsvlul66mv4q47ryef -o inputcopy inputcopy
@@ -68,6 +84,14 @@ wrong
 -- input --
 age
 -- empty --
+-- corrupt.age --
+-----BEGIN AGE ENCRYPTED FILE-----
+YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBDMXYwVmsyU3dyc1NPdUF1
+S1ZKRXhVMXFKWDdyd2ZHajZyUkRDRHBad20wCk93WjZOS0tOZjBNSW5Ka2ErUFRz
+K0gzU1pzWEdqS3EvZWlmbUE1ZE95V1EKLS0tIEZBTW81V3RhWk1xVVhoMnA3UDRl
+YSs2QW5zeHp6ZFk4M1dSc0pmeld6VWcK2XikoRl4QMDKbFQRZXWCl/A6Z5nvCK3a
+RaZyUlKtXBnSTaVCMKRb
+-----END AGE ENCRYPTED FILE-----
 -- key.txt --
 # created: 2021-02-02T13:09:43+01:00
 # public key: age1xmwwc06ly3ee5rytxm9mflaz2u56jjj36s0mypdrwsvlul66mv4q47ryef

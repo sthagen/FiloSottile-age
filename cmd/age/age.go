@@ -521,8 +521,11 @@ func decrypt(identities []age.Identity, in io.Reader, out io.Writer) {
 	} else if err != nil {
 		errorf("%v", err)
 	}
-	out.Write(nil) // trigger the lazyOpener even if r is empty
 	if _, err := io.Copy(out, r); err != nil {
+		errorf("%v", err)
+	}
+	// Trigger the lazyOpener even if r is empty, if Copy succeeded.
+	if _, err := out.Write(nil); err != nil {
 		errorf("%v", err)
 	}
 }
@@ -590,7 +593,7 @@ func (l *lazyOpener) Close() error {
 	if l.f != nil {
 		return l.f.Close()
 	}
-	return nil
+	return l.err
 }
 
 func absPath(name string) string {
