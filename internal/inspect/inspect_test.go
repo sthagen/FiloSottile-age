@@ -10,14 +10,14 @@ import (
 	"filippo.io/age/internal/stream"
 )
 
-// buildFile serializes a header with a single stanza of the given type,
+// buildFile serializes a header with the given stanza types,
 // followed by the minimal valid encrypted payload (a 16-byte stream nonce
 // and a single empty ChaCha20-Poly1305 chunk).
-func buildFile(t *testing.T, stanzaType string) []byte {
+func buildFile(t *testing.T, stanzaTypes ...string) []byte {
 	t.Helper()
-	hdr := &format.Header{
-		Recipients: []*format.Stanza{{Type: stanzaType}},
-		MAC:        make([]byte, 32),
+	hdr := &format.Header{MAC: make([]byte, 32)}
+	for _, stanzaType := range stanzaTypes {
+		hdr.Recipients = append(hdr.Recipients, &format.Stanza{Type: stanzaType})
 	}
 	buf := &bytes.Buffer{}
 	if err := hdr.Marshal(buf); err != nil {
@@ -48,6 +48,35 @@ func TestInspectTagStanzas(t *testing.T) {
 			}
 			if len(md.StanzaTypes) != 1 || md.StanzaTypes[0] != tt.stanzaType {
 				t.Errorf("StanzaTypes = %v, want [%q]", md.StanzaTypes, tt.stanzaType)
+			}
+		})
+	}
+}
+
+func TestInspectPostquantum(t *testing.T) {
+	tests := []struct {
+		name        string
+		stanzaTypes []string
+		want        string
+	}{
+		{"postquantum", []string{"mlkem768x25519"}, "yes"},
+		{"classical", []string{"X25519"}, "no"},
+		{"both", []string{"mlkem768x25519", "X25519"}, "no"},
+		{"unrecognized", []string{"tpm-ecc"}, "unknown"},
+		{"postquantum and unrecognized", []string{"mlkem768x25519", "tpm-ecc"}, "unknown"},
+		{"unrecognized and postquantum", []string{"tpm-ecc", "mlkem768x25519"}, "unknown"},
+		{"classical and unrecognized", []string{"X25519", "tpm-ecc"}, "no"},
+		{"unrecognized and classical", []string{"tpm-ecc", "X25519"}, "no"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := buildFile(t, tt.stanzaTypes...)
+			md, err := Inspect(bytes.NewReader(f), int64(len(f)))
+			if err != nil {
+				t.Fatalf("Inspect: %v", err)
+			}
+			if md.Postquantum != tt.want {
+				t.Errorf("Postquantum = %q, want %q", md.Postquantum, tt.want)
 			}
 		})
 	}
