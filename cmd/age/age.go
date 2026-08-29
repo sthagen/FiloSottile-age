@@ -263,8 +263,16 @@ func main() {
 		}
 	}
 	if name := outFlag; name != "" && name != "-" {
+		outFI, outErr := os.Stat(name)
 		for _, f := range inUseFiles {
-			if f == absPath(name) {
+			same := f == absPath(name)
+			if !same && outErr == nil {
+				if fi, err := os.Stat(f); err == nil {
+					// Catch symlinks and hard links.
+					same = os.SameFile(fi, outFI)
+				}
+			}
+			if same {
 				errorf("input and output file are the same: %q", name)
 			}
 		}

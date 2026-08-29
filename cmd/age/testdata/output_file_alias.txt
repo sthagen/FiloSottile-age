@@ -1,0 +1,61 @@
+[!symlink] skip # no symlink support
+
+age -r age1xmwwc06ly3ee5rytxm9mflaz2u56jjj36s0mypdrwsvlul66mv4q47ryef -o test.age input
+
+# The output is a symlink to the input.
+cp input inputcopy
+symlink inputlink -> inputcopy
+! age -r age1xmwwc06ly3ee5rytxm9mflaz2u56jjj36s0mypdrwsvlul66mv4q47ryef -o inputlink inputcopy
+stderr 'input and output file are the same'
+cmp inputcopy input
+
+# The input is a symlink to the output.
+! age -r age1xmwwc06ly3ee5rytxm9mflaz2u56jjj36s0mypdrwsvlul66mv4q47ryef -o inputcopy inputlink
+stderr 'input and output file are the same'
+cmp inputcopy input
+
+# The output goes through a symlinked directory.
+mkdir dir
+cp input dir/inputcopy
+symlink dirlink -> dir
+! age -r age1xmwwc06ly3ee5rytxm9mflaz2u56jjj36s0mypdrwsvlul66mv4q47ryef -o dirlink/inputcopy dir/inputcopy
+stderr 'input and output file are the same'
+cmp dir/inputcopy input
+
+# The output is a symlink to the identity file.
+cp key.txt keycopy
+symlink keylink -> keycopy
+! age -d -i keycopy -o keylink test.age
+stderr 'input and output file are the same'
+cmp keycopy key.txt
+
+# A distinct existing file is still a valid output.
+cp input other
+age -r age1xmwwc06ly3ee5rytxm9mflaz2u56jjj36s0mypdrwsvlul66mv4q47ryef -o other inputcopy
+! cmp other input
+cmp inputcopy input
+
+# A dangling symlink is still a valid output.
+symlink new -> notexist
+age -d -i key.txt -o new test.age
+cmp notexist input
+
+# testscript has no hard link command, so the rest needs an external ln.
+[!exec:ln] stop
+
+exec ln inputcopy inputhard
+! age -r age1xmwwc06ly3ee5rytxm9mflaz2u56jjj36s0mypdrwsvlul66mv4q47ryef -o inputhard inputcopy
+stderr 'input and output file are the same'
+cmp inputcopy input
+
+exec ln keycopy keyhard
+! age -d -i keycopy -o keyhard test.age
+stderr 'input and output file are the same'
+cmp keycopy key.txt
+
+-- input --
+age
+-- key.txt --
+# created: 2021-02-02T13:09:43+01:00
+# public key: age1xmwwc06ly3ee5rytxm9mflaz2u56jjj36s0mypdrwsvlul66mv4q47ryef
+AGE-SECRET-KEY-1EGTZVFFV20835NWYV6270LXYVK2VKNX2MMDKWYKLMGR48UAWX40Q2P2LM0
