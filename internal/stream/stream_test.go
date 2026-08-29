@@ -451,6 +451,49 @@ func TestDecryptReaderAtEOF(t *testing.T) {
 	}
 }
 
+// TestDecryptReaderTrailingData checks that data appended after a full-length
+// final chunk is rejected, including when the source returns the trailing byte
+// alongside io.EOF as permitted by io.Reader.
+func TestDecryptReaderTrailingData(t *testing.T) {
+	key := make([]byte, chacha20poly1305.KeySize)
+	rand.Read(key)
+
+	// A plaintext of exactly one full chunk, so the trailing data can only be
+	// detected by reading past the final chunk.
+	plaintext := make([]byte, cs)
+	rand.Read(plaintext)
+	ciphertext := encrypt(t, key, plaintext)
+	trailing := append(bytes.Clone(ciphertext), 0x42)
+
+	wrappers := map[string]func(io.Reader) io.Reader{
+		"plain":   func(r io.Reader) io.Reader { return r },
+		"dataErr": iotest.DataErrReader,
+	}
+	for name, wrap := range wrappers {
+		t.Run(name, func(t *testing.T) {
+			r, err := stream.NewDecryptReader(key, wrap(bytes.NewReader(trailing)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := io.ReadAll(r); err == nil {
+				t.Error("trailing data: expected error, got nil")
+			}
+
+			r, err = stream.NewDecryptReader(key, wrap(bytes.NewReader(ciphertext)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := io.ReadAll(r)
+			if err != nil {
+				t.Errorf("valid file: got err=%v, want nil", err)
+			}
+			if !bytes.Equal(got, plaintext) {
+				t.Error("valid file: plaintext mismatch")
+			}
+		})
+	}
+}
+
 func TestDecryptReaderAtEmpty(t *testing.T) {
 	key := make([]byte, chacha20poly1305.KeySize)
 	rand.Read(key)
