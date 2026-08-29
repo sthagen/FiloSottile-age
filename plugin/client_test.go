@@ -84,6 +84,26 @@ func TestIdentityV1NegativeIndex(t *testing.T) {
 	}
 }
 
+func TestPluginNameCase(t *testing.T) {
+	p, err := New("MixedCase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name() != "mixedcase" {
+		t.Errorf("Plugin.Name = %q", p.Name())
+	}
+	id, err := NewIdentityWithoutData("MixedCase", &ClientUI{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.Name() != "mixedcase" {
+		t.Errorf("Identity.Name = %q", id.Name())
+	}
+	if _, err := New("\u212a"); err == nil {
+		t.Error("New accepted a non-ASCII name")
+	}
+}
+
 func TestLabels(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows support is TODO")

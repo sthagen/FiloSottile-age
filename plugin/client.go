@@ -193,7 +193,7 @@ func NewIdentityWithoutData(name string, ui *ClientUI) (*Identity, error) {
 		return nil, fmt.Errorf("invalid plugin name: %q", name)
 	}
 	return &Identity{
-		name: name, encoding: s, ui: ui,
+		name: strings.ToLower(name), encoding: s, ui: ui,
 	}, nil
 }
 

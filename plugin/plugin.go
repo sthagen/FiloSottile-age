@@ -16,6 +16,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 
 	"filippo.io/age"
 	"filippo.io/age/internal/format"
@@ -44,11 +45,14 @@ type Plugin struct {
 	broken bool
 }
 
-// New creates a new Plugin with the given name.
+// New creates a new Plugin with the given case-insensitive name.
 //
 // For example, a plugin named "frood" would be invoked as "age-plugin-frood".
 func New(name string) (*Plugin, error) {
-	return &Plugin{name: name, stdin: os.Stdin,
+	if !validPluginName(name) {
+		return nil, fmt.Errorf("invalid plugin name: %q", name)
+	}
+	return &Plugin{name: strings.ToLower(name), stdin: os.Stdin,
 		stdout: os.Stdout, stderr: os.Stderr}, nil
 }
 
