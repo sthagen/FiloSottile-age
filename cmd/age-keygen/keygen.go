@@ -31,8 +31,8 @@ age-keygen generates a new native X25519 or, with the -pq flag, post-quantum
 hybrid ML-KEM-768 + X25519 key pair, and outputs it to standard output or to
 the OUTPUT file.
 
-If an OUTPUT file is specified, the public key is printed to standard error.
-If OUTPUT already exists, it is not overwritten.
+When generating a key, if the output is not going to a terminal, the public key
+is printed to standard error. If OUTPUT already exists, it is not overwritten.
 
 In -y mode, age-keygen reads an identity file from INPUT or from standard
 input and writes the corresponding recipient(s) to OUTPUT or to standard
