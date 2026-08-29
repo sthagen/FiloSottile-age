@@ -146,6 +146,10 @@ func (r *armoredReader) Read(p []byte) (int, error) {
 	if len(line) > format.ColumnsPerLine {
 		return 0, r.setErr(errors.New("column limit exceeded"))
 	}
+	// Reject newline characters ignored by base64.Decode.
+	if bytes.ContainsAny(line, "\n\r") {
+		return 0, r.setErr(errors.New("unexpected newline character"))
+	}
 	r.unread = r.buf[:]
 	n, err := base64.StdEncoding.Strict().Decode(r.unread, line)
 	if err != nil {
