@@ -60,10 +60,26 @@ ttyout 'Enter passphrase'
 ! stderr .
 cmp stdout input
 
+# armored identity files accept leading whitespace
+exec age-keygen -o key.txt
+age -e -i key.txt -o test.age input
+ttyin newpass
+age -p -a -o key.age key.txt
+exec cat blank key.age
+cp stdout key-with-blank.age
+ttyin terminal
+age -d -i key-with-blank.age test.age
+cmp stdout input
+
 -- input --
 test
 -- terminal --
 password
+-- newpass --
+password
+password
+-- blank --
+
 -- key_ed25519 --
 -----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABCuvb97i7

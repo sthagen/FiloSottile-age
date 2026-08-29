@@ -6,6 +6,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
@@ -179,14 +180,16 @@ func parseIdentitiesFile(name string) ([]age.Identity, error) {
 	}
 
 	b := bufio.NewReader(f)
-	p, _ := b.Peek(14) // length of "age-encryption" and "-----BEGIN AGE"
-	peeked := string(p)
+	const maxWhitespace = 1024
+	p, _ := b.Peek(maxWhitespace + len(armor.Header))
+	trimmed := bytes.TrimSpace(p)
 
 	switch {
 	// An age encrypted file, plain or armored.
-	case peeked == "age-encryption" || peeked == "-----BEGIN AGE":
+	case bytes.HasPrefix(p, []byte("age-encryption")) ||
+		bytes.HasPrefix(trimmed, []byte(armor.Header)):
 		var r io.Reader = b
-		if peeked == "-----BEGIN AGE" {
+		if bytes.HasPrefix(trimmed, []byte(armor.Header)) {
 			r = armor.NewReader(r)
 		}
 		const privateKeySizeLimit = 1 << 24 // 16 MiB
@@ -212,7 +215,7 @@ func parseIdentitiesFile(name string) ([]age.Identity, error) {
 		}}, nil
 
 	// Another PEM file, possibly an SSH private key.
-	case strings.HasPrefix(peeked, "-----BEGIN"):
+	case bytes.HasPrefix(trimmed, []byte("-----BEGIN")):
 		const privateKeySizeLimit = 1 << 14 // 16 KiB
 		contents, err := io.ReadAll(io.LimitReader(b, privateKeySizeLimit))
 		if err != nil {
