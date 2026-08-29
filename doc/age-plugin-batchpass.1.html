@@ -140,11 +140,13 @@ persisted in the shell history or leaked to other users on multi-user systems.</
 <dt><code>AGE_PASSPHRASE_WORK_FACTOR</code></dt>
 <dd>  The scrypt work factor to use when encrypting.
   Must be between 1 and 30. Default is 18.
-  Higher values are more secure but slower.</dd>
+  Higher values are more secure but slower.
+  The age CLI refuses to decrypt files above 22, and so does this plugin
+  unless <code>AGE_PASSPHRASE_MAX_WORK_FACTOR</code> is set to at least the same value.</dd>
 <dt><code>AGE_PASSPHRASE_MAX_WORK_FACTOR</code></dt>
 <dd>  The maximum scrypt work factor to accept when decrypting.
-  Must be between 1 and 30. Default is 30.
-  Can be used to avoid very slow decryptions.</dd>
+  Must be between 1 and 30. Default is 22.
+  Can be used to avoid very slow decryptions, or to allow slower ones.</dd>
 </dl>
 
 <h2 id="EXAMPLES">EXAMPLES</h2>
