@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"testing"
 	"testing/iotest"
 
@@ -630,6 +631,17 @@ func TestDecryptReaderAtInvalidSize(t *testing.T) {
 	_, err = stream.NewDecryptReaderAt(key, bytes.NewReader(make([]byte, invalidSize)), invalidSize)
 	if err == nil {
 		t.Error("invalid size (empty final chunk): expected error, got nil")
+	}
+
+	// Negative sizes and sizes that would overflow the chunk count computation
+	// must be rejected with an error rather than a panic.
+	for _, size := range []int64{-1, -70000, math.MaxInt64, math.MaxInt64 - 200, math.MaxInt64 - 65550} {
+		if _, err := stream.EncryptedChunkCount(size); err == nil {
+			t.Errorf("EncryptedChunkCount(%d): expected error, got nil", size)
+		}
+		if _, err := stream.NewDecryptReaderAt(key, bytes.NewReader(ciphertext), size); err == nil {
+			t.Errorf("NewDecryptReaderAt(%d): expected error, got nil", size)
+		}
 	}
 }
 

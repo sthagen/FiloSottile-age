@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sync/atomic"
 
 	"golang.org/x/crypto/chacha20poly1305"
@@ -20,6 +21,9 @@ import (
 const ChunkSize = 64 * 1024
 
 func EncryptedChunkCount(encryptedSize int64) (int64, error) {
+	if encryptedSize < 0 || encryptedSize > math.MaxInt64-encChunkSize+1 {
+		return 0, fmt.Errorf("invalid encrypted payload size: %d", encryptedSize)
+	}
 	chunks := (encryptedSize + encChunkSize - 1) / encChunkSize
 
 	plaintextSize := encryptedSize - chunks*chacha20poly1305.Overhead
