@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"filippo.io/age"
+	"filippo.io/age/internal/bech32"
 	"filippo.io/age/plugin"
 )
 
@@ -255,6 +256,59 @@ AGE-SECRET-KEY--1D6K0SGAX3NU66R4GYFZY0UQWCLM3UUSF3CXLW4KXZM342WQSJ82QKU59Q`},
 			}
 			if len(got) != tt.wantCount {
 				t.Errorf("ParseIdentities() returned %d identities, want %d", len(got), tt.wantCount)
+			}
+		})
+	}
+}
+
+func TestParseErrorsDoNotIncludeLine(t *testing.T) {
+	x25519, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hybrid, err := age.GenerateHybridIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Re-encode the hybrid identity as a plugin identity.
+	_, seed, err := bech32.Decode(hybrid.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pluginIdentity, err := bech32.Encode("AGE-PLUGIN-PQ-", seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name  string
+		line  string
+		parse func(io.Reader) error
+	}{
+		{"identities/plugin", pluginIdentity, func(r io.Reader) error {
+			_, err := age.ParseIdentities(r)
+			return err
+		}},
+		{"recipients/x25519", x25519.String(), func(r io.Reader) error {
+			_, err := age.ParseRecipients(r)
+			return err
+		}},
+		{"recipients/hybrid", hybrid.String(), func(r io.Reader) error {
+			_, err := age.ParseRecipients(r)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.parse(strings.NewReader("# a comment\n" + tt.line + "\n"))
+			if err == nil {
+				t.Fatal("expected an error for an unrecognized line, got nil")
+			}
+			if strings.Contains(err.Error(), tt.line) {
+				t.Errorf("error includes the private key from the file: %v", err)
+			}
+			if !strings.Contains(err.Error(), "line 2") {
+				t.Errorf("error doesn't say which line failed: %v", err)
 			}
 		})
 	}

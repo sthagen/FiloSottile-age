@@ -268,6 +268,19 @@ func errorf(format string, a ...any) error {
 	return &ParseError{fmt.Errorf(format, a...)}
 }
 
+// describeIntro returns a quoted description of a bad intro line, or an empty
+// string if the line contains recognizable private key material.
+func describeIntro(line string) string {
+	for _, prefix := range []string{"AGE-SECRET-KEY-", "AGE-PLUGIN-"} {
+		if strings.HasPrefix(line, prefix) {
+			return ""
+		}
+	}
+	// Preserve enough context to diagnose a mangled intro without echoing an
+	// arbitrarily long first line.
+	return fmt.Sprintf("%q", line[:min(len(line), len(intro))])
+}
+
 // Parse returns the header and a Reader that begins at the start of the
 // payload.
 func Parse(input io.Reader) (*Header, io.Reader, error) {
@@ -277,7 +290,13 @@ func Parse(input io.Reader) (*Header, io.Reader, error) {
 
 	line, err := hr.ReadString('\n')
 	if err == io.EOF {
-		return nil, nil, errorf("file is empty")
+		if len(line) == 0 {
+			return nil, nil, errorf("file is empty")
+		}
+		if description := describeIntro(line); description != "" {
+			return nil, nil, errorf("unexpected EOF reading intro: %s", description)
+		}
+		return nil, nil, errorf("unexpected EOF reading intro, expected %q", intro)
 	} else if err != nil {
 		// headerReader errors are already ParseErrors; don't nest the prefix.
 		if _, ok := err.(*ParseError); ok {
@@ -286,7 +305,10 @@ func Parse(input io.Reader) (*Header, io.Reader, error) {
 		return nil, nil, errorf("failed to read intro: %w", err)
 	}
 	if line != intro {
-		return nil, nil, errorf("unexpected intro: %q", line)
+		if description := describeIntro(line); description != "" {
+			return nil, nil, errorf("unexpected intro: %s", description)
+		}
+		return nil, nil, errorf("unexpected intro, expected %q", intro)
 	}
 
 	sr := &StanzaReader{r: hr}

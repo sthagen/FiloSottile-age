@@ -57,7 +57,9 @@ func parseIdentity(arg string) (Identity, error) {
 	case strings.HasPrefix(arg, "AGE-SECRET-KEY-PQ-1"):
 		return ParseHybridIdentity(arg)
 	default:
-		return nil, fmt.Errorf("unknown identity type: %q", arg)
+		// Don't include arg in the error: it may contain private key material,
+		// and callers print these errors.
+		return nil, fmt.Errorf("unknown identity type")
 	}
 }
 
@@ -107,6 +109,8 @@ func parseRecipient(arg string) (Recipient, error) {
 	case strings.HasPrefix(arg, "age1"):
 		return ParseX25519Recipient(arg)
 	default:
-		return nil, fmt.Errorf("unknown recipient type: %q", arg)
+		// It might be a private key from an identities file accidentally used
+		// as a recipients file, so don't include arg in the error.
+		return nil, fmt.Errorf("unknown recipient type")
 	}
 }

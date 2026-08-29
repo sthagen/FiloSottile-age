@@ -184,3 +184,81 @@ func FuzzMalleability(f *testing.F) {
 		}
 	})
 }
+
+const secret = "AGE-SECRET-KEY-1NOTAREALKEYNOTAREALKEYNOTAREALKEYNOTAREALKEYNOTAREALKEYNOTA"
+
+const pluginSecret = "AGE-PLUGIN-PQ-1NOTAREALKEYNOTAREALKEYNOTAREALKEYNOTAREALKEYNOTAREALKEYNOTA"
+
+func TestParseIntroErrorIsNotSecret(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		input  string
+		secret bool
+	}{
+		{"identity", secret + "\n", true},
+		{"identity, no newline", secret, true},
+		{"plugin identity", pluginSecret + "\n", true},
+		{"plugin identity, no newline", pluginSecret, true},
+		{"truncated intro", "age-encryption.org/v1", false},
+		{"binary", "\x00\x01\x02", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := format.Parse(strings.NewReader(test.input))
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if strings.Contains(err.Error(), "file is empty") {
+				t.Errorf("error says the file is empty, but it is %d bytes: %v",
+					len(test.input), err)
+			}
+			// Check substrings, not just the key prefix.
+			if test.secret {
+				key := strings.TrimSuffix(test.input, "\n")
+				for i := 0; i+17 <= len(key); i++ {
+					if strings.Contains(err.Error(), key[i:i+17]) {
+						t.Errorf("error includes %q, a run of the first line, "+
+							"which is a private key: %v", key[i:i+17], err)
+						break
+					}
+				}
+			}
+		})
+	}
+
+	// Preserve the error for empty files (#416).
+	t.Run("empty", func(t *testing.T) {
+		_, _, err := format.Parse(strings.NewReader(""))
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if !strings.Contains(err.Error(), "file is empty") {
+			t.Errorf("expected an empty file error, got: %v", err)
+		}
+	})
+}
+
+func TestParseIntroErrorShowsMangling(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"crlf", "age-encryption.org/v1\r\n", `\r`},
+		{"utf8 bom", "\xef\xbb\xbfage-encryption.org/v1\n", `\ufeff`},
+		{"utf16be", "\x00a\x00g\x00e\x00-\x00e\x00n\x00c\x00r\x00y\x00p\x00", `\x00a\x00g\x00e`},
+		{"trailing space", "age-encryption.org/v1 \n", `v1 `},
+		{"wrong version", "age-encryption.org/v2\n", "v2"},
+		{"leading blank line", "\nage-encryption.org/v1\n", `"\n"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := format.Parse(strings.NewReader(test.input))
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Errorf("error does not show the mangling: got %v, want it to contain %q",
+					err, test.want)
+			}
+		})
+	}
+}
