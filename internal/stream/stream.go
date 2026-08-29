@@ -374,7 +374,15 @@ func NewDecryptReaderAt(key []byte, src io.ReaderAt, size int64) (*DecryptReader
 	finalChunkOff := finalChunkIndex * encChunkSize
 	finalChunkSize := size - finalChunkOff
 	finalChunk := make([]byte, finalChunkSize)
-	if _, err := src.ReadAt(finalChunk, finalChunkOff); err != nil {
+	nn, err := src.ReadAt(finalChunk, finalChunkOff)
+	if err == io.EOF {
+		if int64(nn) != finalChunkSize {
+			err = io.ErrUnexpectedEOF
+		} else {
+			err = nil
+		}
+	}
+	if err != nil {
 		return nil, fmt.Errorf("failed to read final chunk: %w", err)
 	}
 	nonce := nonceForChunk(finalChunkIndex)
