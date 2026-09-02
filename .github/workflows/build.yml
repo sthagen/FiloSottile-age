@@ -19,15 +19,16 @@ jobs:
           - {GOOS: darwin, GOARCH: arm64}
           - {GOOS: darwin, GOARCH: amd64}
           - {GOOS: windows, GOARCH: amd64}
+          - {GOOS: windows, GOARCH: arm64}
           - {GOOS: freebsd, GOARCH: amd64}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: false
@@ -36,21 +37,10 @@ jobs:
           VERSION="$(git describe --tags)"
           DIR="$(mktemp -d)"
           mkdir "$DIR/age"
-          go build -o "$DIR/age" -trimpath ./cmd/...
+          go build -o "$DIR/age" -trimpath ./cmd/... ./extra/...
           cp LICENSE "$DIR/age/LICENSE"
           cat .github/workflows/LICENSE.suffix.txt >> "$DIR/age/LICENSE"
           if [ "$GOOS" == "windows" ]; then
-            sudo apt-get update && sudo apt-get install -y osslsigncode
-            if [ -n "${{ secrets.SIGN_PASS }}" ]; then
-              for exe in "$DIR"/age/*.exe; do
-                /usr/bin/osslsigncode sign -t "http://timestamp.comodoca.com" \
-                  -certs .github/workflows/certs/uitacllc.crt \
-                  -key .github/workflows/certs/uitacllc.key \
-                  -pass "${{ secrets.SIGN_PASS }}" \
-                  -n age -in "$exe" -out "$exe.signed"
-                mv "$exe.signed" "$exe"
-              done
-            fi
             ( cd "$DIR"; zip age.zip -r age )
             mv "$DIR/age.zip" "age-$VERSION-$GOOS-$GOARCH.zip"
           else
@@ -62,7 +52,7 @@ jobs:
           GOARCH: ${{ matrix.GOARCH }}
           GOARM: ${{ matrix.GOARM }}
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: age-artifacts-${{ matrix.GOOS }}-${{ matrix.GOARCH }}
           path: age-*
@@ -71,12 +61,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: false
@@ -94,7 +84,7 @@ jobs:
           done
           tar -cvzf "age-$VERSION-source.tar.gz" -C "$DIR" age
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: age-artifacts-source
           path: age-*-source.tar.gz
@@ -109,12 +99,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download workflow artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: age-artifacts-*
           merge-multiple: true
       - name: Generate artifacts attestation
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: age-*
       - name: Upload release artifacts

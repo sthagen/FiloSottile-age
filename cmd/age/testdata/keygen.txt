@@ -23,3 +23,7 @@ stdout age1pq1
 
 exec age-keygen -y key.txt
 stdout age1pq1
+
+! exec age-keygen -y -o missing.txt missing
+stderr 'failed to open input file'
+! exists missing.txt

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
+	"unicode"
 
 	"golang.org/x/term"
 )
@@ -12,6 +14,15 @@ import (
 // on Windows. If it fails, avoid using escape sequences to prevent weird
 // characters being printed to the console.
 var enableVirtualTerminalProcessing func(out *os.File) error
+
+func printPrompt(out *os.File, prompt string) {
+	fmt.Fprintf(out, "%s ", strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '\uFFFD'
+		}
+		return r
+	}, prompt))
+}
 
 // clearLine clears the current line on the terminal, or opens a new line if
 // terminal escape codes don't work.
@@ -64,7 +75,7 @@ func WithTerminal(f func(in, out *os.File) error) error {
 // ReadSecret reads a value from the terminal with no echo. The prompt is ephemeral.
 func ReadSecret(prompt string) (s []byte, err error) {
 	err = WithTerminal(func(in, out *os.File) error {
-		fmt.Fprintf(out, "%s ", prompt)
+		printPrompt(out, prompt)
 		defer clearLine(out)
 		s, err = term.ReadPassword(int(in.Fd()))
 		return err
@@ -75,7 +86,7 @@ func ReadSecret(prompt string) (s []byte, err error) {
 // ReadPublic reads a value from the terminal. The prompt is ephemeral.
 func ReadPublic(prompt string) (s []byte, err error) {
 	err = WithTerminal(func(in, out *os.File) error {
-		fmt.Fprintf(out, "%s ", prompt)
+		printPrompt(out, prompt)
 		defer clearLine(out)
 
 		oldState, err := term.MakeRaw(int(in.Fd()))
@@ -96,7 +107,7 @@ func ReadPublic(prompt string) (s []byte, err error) {
 // prompt is ephemeral.
 func ReadCharacter(prompt string) (c byte, err error) {
 	err = WithTerminal(func(in, out *os.File) error {
-		fmt.Fprintf(out, "%s ", prompt)
+		printPrompt(out, prompt)
 		defer clearLine(out)
 
 		oldState, err := term.MakeRaw(int(in.Fd()))

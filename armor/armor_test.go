@@ -12,12 +12,12 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	agetest "c2sp.org/CCTV/age"
 	"filippo.io/age"
 	"filippo.io/age/armor"
 	"filippo.io/age/internal/format"
@@ -94,6 +94,28 @@ func TestArmor(t *testing.T) {
 	t.Run("FullLine", func(t *testing.T) { testArmor(t, 10*format.BytesPerLine) })
 }
 
+func TestWriterLifecycle(t *testing.T) {
+	t.Run("CloseWithoutWrite", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		w := armor.NewWriter(buf)
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if want := armor.Header + "\n" + armor.Footer + "\n"; buf.String() != want {
+			t.Errorf("output = %q, want %q", buf.String(), want)
+		}
+	})
+	t.Run("WriteAfterClose", func(t *testing.T) {
+		w := armor.NewWriter(io.Discard)
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if n, err := w.Write([]byte("x")); n != 0 || err == nil {
+			t.Errorf("Write after Close = %d, %v", n, err)
+		}
+	})
+}
+
 func testArmor(t *testing.T, size int) {
 	buf := &bytes.Buffer{}
 	w := armor.NewWriter(buf)
@@ -134,12 +156,13 @@ func testArmor(t *testing.T, size int) {
 }
 
 func FuzzMalleability(f *testing.F) {
-	tests, err := filepath.Glob("../testdata/testkit/*")
+	tests, err := fs.ReadDir(agetest.Vectors, ".")
 	if err != nil {
 		f.Fatal(err)
 	}
+	seeds := 0
 	for _, test := range tests {
-		contents, err := os.ReadFile(test)
+		contents, err := fs.ReadFile(agetest.Vectors, test.Name())
 		if err != nil {
 			f.Fatal(err)
 		}
@@ -149,7 +172,11 @@ func FuzzMalleability(f *testing.F) {
 		}
 		if bytes.Contains(header, []byte("armored: yes")) {
 			f.Add(contents)
+			seeds++
 		}
+	}
+	if seeds == 0 {
+		f.Fatal("no armored test vectors")
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
 		r := armor.NewReader(bytes.NewReader(data))

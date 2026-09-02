@@ -7,6 +7,7 @@
 package plugin
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"io"
@@ -19,6 +20,7 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/internal/bech32"
+	"filippo.io/age/internal/format"
 )
 
 func TestMain(m *testing.M) {
@@ -65,6 +67,59 @@ func (testPQCRecipient) Wrap(fileKey []byte) ([]*age.Stanza, error) {
 
 func (testPQCRecipient) WrapWithLabels(fileKey []byte) ([]*age.Stanza, []string, error) {
 	return []*age.Stanza{{Type: "test", Body: fileKey}}, []string{"postquantum"}, nil
+}
+
+func TestIdentityV1NegativeIndex(t *testing.T) {
+	p, err := New("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.HandleIdentity(func([]byte) (age.Identity, error) { return nil, nil })
+	stderr := &bytes.Buffer{}
+	p.SetIO(strings.NewReader("-> recipient-stanza -1 X25519\n\n"), io.Discard, stderr)
+	if code := p.IdentityV1(); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	want := "unexpected file index -1, previous was -1"
+	if got := stderr.String(); got != want {
+		t.Errorf("stderr = %q, want %q", got, want)
+	}
+}
+
+func TestPluginNameCase(t *testing.T) {
+	p, err := New("MixedCase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name() != "mixedcase" {
+		t.Errorf("Plugin.Name = %q", p.Name())
+	}
+	id, err := NewIdentityWithoutData("MixedCase", &ClientUI{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.Name() != "mixedcase" {
+		t.Errorf("Identity.Name = %q", id.Name())
+	}
+	if _, err := New("\u212a"); err == nil {
+		t.Error("New accepted a non-ASCII name")
+	}
+}
+
+func TestRequestValueEmpty(t *testing.T) {
+	p, err := New("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.SetIO(nil, io.Discard, io.Discard)
+	p.sr = format.NewStanzaReader(bufio.NewReader(strings.NewReader("-> ok\n\n")))
+	value, err := p.RequestValue("prompt", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != "" {
+		t.Errorf("value = %q", value)
+	}
 }
 
 func TestLabels(t *testing.T) {

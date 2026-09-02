@@ -101,6 +101,9 @@ func main() {
 		case "no":
 			fmt.Printf("This file does NOT use post-quantum encryption.\n")
 			fmt.Printf("\n")
+		case "unknown":
+			fmt.Printf("It is unknown whether this file uses post-quantum encryption.\n")
+			fmt.Printf("\n")
 		}
 		fmt.Printf("Size breakdown (assuming it decrypts successfully):\n")
 		fmt.Printf("\n")

@@ -321,6 +321,8 @@ func decryptHdr(hdr *format.Header, identities ...Identity) ([]byte, error) {
 	if len(identities) == 0 {
 		return nil, errors.New("no identities specified")
 	}
+	// Don't sort the caller's slice in place.
+	identities = slices.Clone(identities)
 	slices.SortStableFunc(identities, func(a, b Identity) int {
 		var aIsNative, bIsNative bool
 		switch a.(type) {

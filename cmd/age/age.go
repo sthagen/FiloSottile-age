@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
@@ -41,6 +42,7 @@ Options:
     -r, --recipient RECIPIENT   Encrypt to the specified RECIPIENT. Can be repeated.
     -R, --recipients-file PATH  Encrypt to recipients listed at PATH. Can be repeated.
     -i, --identity PATH         Use the identity file at PATH. Can be repeated.
+    --version                   Print the version.
 
 INPUT defaults to standard input, and OUTPUT defaults to standard output.
 If OUTPUT exists, it will be overwritten.
@@ -262,8 +264,16 @@ func main() {
 		}
 	}
 	if name := outFlag; name != "" && name != "-" {
+		outFI, outErr := os.Stat(name)
 		for _, f := range inUseFiles {
-			if f == absPath(name) {
+			same := f == absPath(name)
+			if !same && outErr == nil {
+				if fi, err := os.Stat(f); err == nil {
+					// Catch symlinks and hard links.
+					same = os.SameFile(fi, outFI)
+				}
+			}
+			if same {
 				errorf("input and output file are the same: %q", name)
 			}
 		}
@@ -286,7 +296,7 @@ func main() {
 				// Buffer the output to check it's printable.
 				out = buf
 				defer func() {
-					if bytes.ContainsFunc(buf.Bytes(), func(r rune) bool {
+					if !utf8.Valid(buf.Bytes()) || bytes.ContainsFunc(buf.Bytes(), func(r rune) bool {
 						return r != '\n' && r != '\r' && r != '\t' && unicode.IsControl(r)
 					}) {
 						errorWithHint("refusing to output binary to the terminal",
@@ -512,8 +522,11 @@ func decrypt(identities []age.Identity, in io.Reader, out io.Writer) {
 	} else if err != nil {
 		errorf("%v", err)
 	}
-	out.Write(nil) // trigger the lazyOpener even if r is empty
 	if _, err := io.Copy(out, r); err != nil {
+		errorf("%v", err)
+	}
+	// Trigger the lazyOpener even if r is empty, if Copy succeeded.
+	if _, err := out.Write(nil); err != nil {
 		errorf("%v", err)
 	}
 }
@@ -581,7 +594,7 @@ func (l *lazyOpener) Close() error {
 	if l.f != nil {
 		return l.f.Close()
 	}
-	return nil
+	return l.err
 }
 
 func absPath(name string) string {

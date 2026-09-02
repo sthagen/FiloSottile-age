@@ -16,6 +16,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 
 	"filippo.io/age"
 	"filippo.io/age/internal/format"
@@ -44,11 +45,14 @@ type Plugin struct {
 	broken bool
 }
 
-// New creates a new Plugin with the given name.
+// New creates a new Plugin with the given case-insensitive name.
 //
 // For example, a plugin named "frood" would be invoked as "age-plugin-frood".
 func New(name string) (*Plugin, error) {
-	return &Plugin{name: name, stdin: os.Stdin,
+	if !validPluginName(name) {
+		return nil, fmt.Errorf("invalid plugin name: %q", name)
+	}
+	return &Plugin{name: strings.ToLower(name), stdin: os.Stdin,
 		stdout: os.Stdout, stderr: os.Stderr}, nil
 }
 
@@ -399,6 +403,9 @@ ReadLoop:
 			if err != nil {
 				return p.fatalf("failed to parse recipient-stanza stanza argument: %v", err)
 			}
+			if i < 0 {
+				return p.fatalf("unexpected file index %d, previous was %d", i, len(files)-1)
+			}
 			ss := &age.Stanza{Type: s.Args[1], Args: s.Args[2:], Body: s.Body}
 			switch i {
 			case len(files):
@@ -530,7 +537,7 @@ func (p *Plugin) RequestValue(prompt string, secret bool) (string, error) {
 	if s.Type == "fail" {
 		return "", fmt.Errorf("client failed to request value")
 	}
-	if err := expectStanzaWithBody(s, 0); err != nil {
+	if err := expectStanzaWithAnyBody(s, 0); err != nil {
 		return "", p.fatalInteractf("%v", err)
 	}
 	return string(s.Body), nil
@@ -589,11 +596,18 @@ func expectStanzaWithNoBody(s *format.Stanza, wantArgs int) error {
 }
 
 func expectStanzaWithBody(s *format.Stanza, wantArgs int) error {
-	if len(s.Args) != wantArgs {
-		return fmt.Errorf("%s stanza has %d arguments, want %d", s.Type, len(s.Args), wantArgs)
+	if err := expectStanzaWithAnyBody(s, wantArgs); err != nil {
+		return err
 	}
 	if len(s.Body) == 0 {
 		return fmt.Errorf("%s stanza has 0 bytes of body, want >0", s.Type)
+	}
+	return nil
+}
+
+func expectStanzaWithAnyBody(s *format.Stanza, wantArgs int) error {
+	if len(s.Args) != wantArgs {
+		return fmt.Errorf("%s stanza has %d arguments, want %d", s.Type, len(s.Args), wantArgs)
 	}
 	return nil
 }

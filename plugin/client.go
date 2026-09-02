@@ -193,7 +193,7 @@ func NewIdentityWithoutData(name string, ui *ClientUI) (*Identity, error) {
 		return nil, fmt.Errorf("invalid plugin name: %q", name)
 	}
 	return &Identity{
-		name: name, encoding: s, ui: ui,
+		name: strings.ToLower(name), encoding: s, ui: ui,
 	}, nil
 }
 
@@ -457,9 +457,8 @@ func openClientConnection(name, protocol string) (*clientConnection, error) {
 		cmd.Stderr = os.Stderr
 	}
 
-	// We don't want the plugins to rely on the working directory for anything
-	// as different clients might treat it differently, so we set it to an empty
-	// temporary directory.
+	// Avoid running plugins in the client's working directory, as it might
+	// differ between clients.
 	cmd.Dir = os.TempDir()
 
 	if err := cmd.Start(); err != nil {

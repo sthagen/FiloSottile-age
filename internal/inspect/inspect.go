@@ -33,7 +33,7 @@ type Metadata struct {
 func Inspect(r io.Reader, fileSize int64) (*Metadata, error) {
 	data := &Metadata{
 		Version:     "age-encryption.org/v1",
-		Postquantum: "unknown",
+		Postquantum: "yes",
 	}
 
 	tr := &trackReader{r: r}
@@ -64,8 +64,10 @@ func Inspect(r io.Reader, fileSize int64) (*Metadata, error) {
 		case "X25519", "ssh-rsa", "ssh-ed25519", "p256tag", "piv-p256":
 			data.Postquantum = "no"
 		case "mlkem768x25519", "scrypt", "mlkem768p256tag":
+			// Keep "yes".
+		default:
 			if data.Postquantum != "no" {
-				data.Postquantum = "yes"
+				data.Postquantum = "unknown"
 			}
 		}
 	}
@@ -103,12 +105,13 @@ type trackReader struct {
 }
 
 func (tr *trackReader) Read(p []byte) (int, error) {
+	if tr.done {
+		return 0, io.EOF
+	}
 	n, err := tr.r.Read(p)
 	tr.count += int64(n)
 	if err == io.EOF {
 		tr.done = true
-	} else if tr.done {
-		panic("non-EOF read after EOF")
 	}
 	return n, err
 }

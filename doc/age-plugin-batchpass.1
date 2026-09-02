@@ -1,6 +1,6 @@
 .\" generated with Ronn-NG/v0.9.1
 .\" http://github.com/apjanke/ronn-ng/tree/0.9.1
-.TH "AGE\-PLUGIN\-BATCHPASS" "1" "December 2025" ""
+.TH "AGE\-PLUGIN\-BATCHPASS" "1" "August 2026" ""
 .SH "NAME"
 \fBage\-plugin\-batchpass\fR \- non\-interactive passphrase encryption plugin for age(1)
 .SH "SYNOPSIS"
@@ -56,10 +56,10 @@ The passphrase to use for encryption or decryption\. Mutually exclusive with \fB
 A file descriptor number to read the passphrase from\. Trailing newlines are stripped from the file contents\. Mutually exclusive with \fBAGE_PASSPHRASE\fR\.
 .TP
 \fBAGE_PASSPHRASE_WORK_FACTOR\fR
-The scrypt work factor to use when encrypting\. Must be between 1 and 30\. Default is 18\. Higher values are more secure but slower\.
+The scrypt work factor to use when encrypting\. Must be between 1 and 30\. Default is 18\. Higher values are more secure but slower\. The age CLI refuses to decrypt files above 22, and so does this plugin unless \fBAGE_PASSPHRASE_MAX_WORK_FACTOR\fR is set to at least the same value\.
 .TP
 \fBAGE_PASSPHRASE_MAX_WORK_FACTOR\fR
-The maximum scrypt work factor to accept when decrypting\. Must be between 1 and 30\. Default is 30\. Can be used to avoid very slow decryptions\.
+The maximum scrypt work factor to accept when decrypting\. Must be between 1 and 30\. Default is 22\. Can be used to avoid very slow decryptions, or to allow slower ones\.
 .SH "EXAMPLES"
 Encrypt a file with a passphrase:
 .IP "" 4

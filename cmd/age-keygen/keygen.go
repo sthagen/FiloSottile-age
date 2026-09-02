@@ -31,8 +31,8 @@ age-keygen generates a new native X25519 or, with the -pq flag, post-quantum
 hybrid ML-KEM-768 + X25519 key pair, and outputs it to standard output or to
 the OUTPUT file.
 
-If an OUTPUT file is specified, the public key is printed to standard error.
-If OUTPUT already exists, it is not overwritten.
+When generating a key, if the output is not going to a terminal, the public key
+is printed to standard error. If OUTPUT already exists, it is not overwritten.
 
 In -y mode, age-keygen reads an identity file from INPUT or from standard
 input and writes the corresponding recipient(s) to OUTPUT or to standard
@@ -92,6 +92,20 @@ func main() {
 		errorf("-pq cannot be used with -y")
 	}
 
+	var converted []byte
+	if convertFlag {
+		in := os.Stdin
+		if inFile := flag.Arg(0); inFile != "" && inFile != "-" {
+			f, err := os.Open(inFile)
+			if err != nil {
+				errorf("failed to open input file %q: %v", inFile, err)
+			}
+			defer f.Close()
+			in = f
+		}
+		converted = convert(in)
+	}
+
 	out := os.Stdout
 	if outFlag != "" {
 		f, err := os.OpenFile(outFlag, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
@@ -106,18 +120,8 @@ func main() {
 		out = f
 	}
 
-	in := os.Stdin
-	if inFile := flag.Arg(0); inFile != "" && inFile != "-" {
-		f, err := os.Open(inFile)
-		if err != nil {
-			errorf("failed to open input file %q: %v", inFile, err)
-		}
-		defer f.Close()
-		in = f
-	}
-
 	if convertFlag {
-		convert(in, out)
+		writef(out, "%s", converted)
 	} else {
 		if fi, err := out.Stat(); err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0004 != 0 {
 			warning("writing secret key to a world-readable file")
@@ -149,12 +153,18 @@ func generate(out *os.File, pq bool) {
 		fmt.Fprintf(os.Stderr, "Public key: %s\n", r)
 	}
 
-	fmt.Fprintf(out, "# created: %s\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(out, "# public key: %s\n", r)
-	fmt.Fprintf(out, "%s\n", i)
+	writef(out, "# created: %s\n", time.Now().Format(time.RFC3339))
+	writef(out, "# public key: %s\n", r)
+	writef(out, "%s\n", i)
 }
 
-func convert(in io.Reader, out io.Writer) {
+func writef(out io.Writer, format string, v ...any) {
+	if _, err := fmt.Fprintf(out, format, v...); err != nil {
+		errorf("failed to write output: %v", err)
+	}
+}
+
+func convert(in io.Reader) []byte {
 	ids, err := age.ParseIdentities(in)
 	if err != nil {
 		errorf("failed to parse input: %v", err)
@@ -162,17 +172,19 @@ func convert(in io.Reader, out io.Writer) {
 	if len(ids) == 0 {
 		errorf("no identities found in the input")
 	}
+	var out []byte
 	for _, id := range ids {
 		switch id := id.(type) {
 		case *age.X25519Identity:
-			fmt.Fprintf(out, "%s\n", id.Recipient())
+			out = append(out, id.Recipient().String()...)
 		case *age.HybridIdentity:
-			fmt.Fprintf(out, "%s\n", id.Recipient())
+			out = append(out, id.Recipient().String()...)
 		default:
 			errorf("internal error: unexpected identity type: %T", id)
 		}
-
+		out = append(out, '\n')
 	}
+	return out
 }
 
 func errorf(format string, v ...any) {

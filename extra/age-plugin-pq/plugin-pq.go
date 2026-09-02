@@ -66,6 +66,17 @@ func main() {
 			errorf("too many arguments")
 		}
 
+		in := os.Stdin
+		if inFile := flag.Arg(0); inFile != "" && inFile != "-" {
+			f, err := os.Open(inFile)
+			if err != nil {
+				errorf("failed to open input file %q: %v", inFile, err)
+			}
+			defer f.Close()
+			in = f
+		}
+		converted := convert(in)
+
 		out := os.Stdout
 		if outFlag != "" {
 			f, err := os.OpenFile(outFlag, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
@@ -82,18 +93,9 @@ func main() {
 		if fi, err := out.Stat(); err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0004 != 0 {
 			warning("writing secret key to a world-readable file")
 		}
-
-		in := os.Stdin
-		if inFile := flag.Arg(0); inFile != "" && inFile != "-" {
-			f, err := os.Open(inFile)
-			if err != nil {
-				errorf("failed to open input file %q: %v", inFile, err)
-			}
-			defer f.Close()
-			in = f
+		if _, err := out.Write(converted); err != nil {
+			errorf("failed to write output: %v", err)
 		}
-
-		convert(in, out)
 		return
 	}
 
@@ -123,11 +125,12 @@ func main() {
 	os.Exit(p.Main())
 }
 
-func convert(in io.Reader, out io.Writer) {
+func convert(in io.Reader) []byte {
 	ids, err := age.ParseIdentities(in)
 	if err != nil {
 		errorf("failed to parse identities: %v", err)
 	}
+	var out []byte
 	for i, id := range ids {
 		hybridID, ok := id.(*age.HybridIdentity)
 		if !ok {
@@ -137,8 +140,10 @@ func convert(in io.Reader, out io.Writer) {
 		if err != nil {
 			errorf("failed to decode identity #%d: %v", i+1, err)
 		}
-		fmt.Fprintln(out, plugin.EncodeIdentity("pq", data))
+		out = append(out, plugin.EncodeIdentity("pq", data)...)
+		out = append(out, '\n')
 	}
+	return out
 }
 
 func errorf(format string, v ...any) {

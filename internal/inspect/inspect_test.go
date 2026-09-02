@@ -3,20 +3,21 @@ package inspect
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"testing"
 
 	"filippo.io/age/internal/format"
 	"filippo.io/age/internal/stream"
 )
 
-// buildFile serializes a header with a single stanza of the given type,
+// buildFile serializes a header with the given stanza types,
 // followed by the minimal valid encrypted payload (a 16-byte stream nonce
 // and a single empty ChaCha20-Poly1305 chunk).
-func buildFile(t *testing.T, stanzaType string) []byte {
+func buildFile(t *testing.T, stanzaTypes ...string) []byte {
 	t.Helper()
-	hdr := &format.Header{
-		Recipients: []*format.Stanza{{Type: stanzaType}},
-		MAC:        make([]byte, 32),
+	hdr := &format.Header{MAC: make([]byte, 32)}
+	for _, stanzaType := range stanzaTypes {
+		hdr.Recipients = append(hdr.Recipients, &format.Stanza{Type: stanzaType})
 	}
 	buf := &bytes.Buffer{}
 	if err := hdr.Marshal(buf); err != nil {
@@ -49,6 +50,73 @@ func TestInspectTagStanzas(t *testing.T) {
 				t.Errorf("StanzaTypes = %v, want [%q]", md.StanzaTypes, tt.stanzaType)
 			}
 		})
+	}
+}
+
+func TestInspectPostquantum(t *testing.T) {
+	tests := []struct {
+		name        string
+		stanzaTypes []string
+		want        string
+	}{
+		{"postquantum", []string{"mlkem768x25519"}, "yes"},
+		{"classical", []string{"X25519"}, "no"},
+		{"both", []string{"mlkem768x25519", "X25519"}, "no"},
+		{"unrecognized", []string{"tpm-ecc"}, "unknown"},
+		{"postquantum and unrecognized", []string{"mlkem768x25519", "tpm-ecc"}, "unknown"},
+		{"unrecognized and postquantum", []string{"tpm-ecc", "mlkem768x25519"}, "unknown"},
+		{"classical and unrecognized", []string{"X25519", "tpm-ecc"}, "no"},
+		{"unrecognized and classical", []string{"tpm-ecc", "X25519"}, "no"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := buildFile(t, tt.stanzaTypes...)
+			md, err := Inspect(bytes.NewReader(f), int64(len(f)))
+			if err != nil {
+				t.Fatalf("Inspect: %v", err)
+			}
+			if md.Postquantum != tt.want {
+				t.Errorf("Postquantum = %q, want %q", md.Postquantum, tt.want)
+			}
+		})
+	}
+}
+
+// readAfterEOFReader returns io.EOF along with the last of its data, and then
+// more data from subsequent Reads, like a terminal that received Ctrl-D
+// followed by more input.
+type readAfterEOFReader struct {
+	data []byte
+	eof  bool
+}
+
+func (r *readAfterEOFReader) Read(p []byte) (int, error) {
+	if r.eof {
+		return copy(p, "\n"), nil
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	if len(r.data) == 0 {
+		r.eof = true
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+func TestInspectReadAfterEOF(t *testing.T) {
+	f := buildFile(t, "X25519")
+	r := &readAfterEOFReader{data: f}
+	md, err := Inspect(r, -1)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if md.Version != "age-encryption.org/v1" {
+		t.Errorf("Version = %q, want age-encryption.org/v1", md.Version)
+	}
+	// If the reads after EOF were counted towards the file size, the extra
+	// bytes would show up in the payload size.
+	if md.Sizes.MinPayload != 0 {
+		t.Errorf("MinPayload = %d, want 0", md.Sizes.MinPayload)
 	}
 }
 

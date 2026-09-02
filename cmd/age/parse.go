@@ -6,6 +6,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -71,7 +73,8 @@ func parseRecipientsFile(name string) ([]age.Recipient, error) {
 	const recipientFileSizeLimit = 16 << 20 // 16 MiB
 	const lineLengthLimit = 8 << 10         // 8 KiB, same as sshd(8)
 	var recs []age.Recipient
-	scanner := bufio.NewScanner(io.LimitReader(f, recipientFileSizeLimit))
+	lr := &io.LimitedReader{R: f, N: recipientFileSizeLimit + 1}
+	scanner := bufio.NewScanner(lr)
 	var n int
 	for scanner.Scan() {
 		n++
@@ -87,7 +90,7 @@ func parseRecipientsFile(name string) ([]age.Recipient, error) {
 		}
 		r, err := parseRecipient(line)
 		if err != nil {
-			if t, ok := sshKeyType(line); ok {
+			if t, unsupported := unsupportedSSHKey(line); unsupported {
 				// Skip unsupported but valid SSH public keys with a warning.
 				warningf("recipients file %q: ignoring unsupported SSH key of type %q at line %d", name, t, n)
 				continue
@@ -104,13 +107,16 @@ func parseRecipientsFile(name string) ([]age.Recipient, error) {
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("%q: failed to read recipients file: %v", name, err)
 	}
+	if lr.N == 0 {
+		return nil, fmt.Errorf("%q: recipients file is too long", name)
+	}
 	if len(recs) == 0 {
 		return nil, fmt.Errorf("%q: no recipients found", name)
 	}
 	return recs, nil
 }
 
-func sshKeyType(s string) (string, bool) {
+func unsupportedSSHKey(s string) (string, bool) {
 	// TODO: also ignore options? And maybe support multiple spaces and tabs as
 	// field separators like OpenSSH?
 	fields := strings.Split(s, " ")
@@ -128,7 +134,26 @@ func sshKeyType(s string) (string, bool) {
 		return "", false
 	}
 	if t := fields[0]; t == string(typeBytes) {
-		return t, true
+		switch t {
+		case "ssh-ed25519":
+			return "", false
+		case "ssh-rsa":
+			out, _, _, _, err := ssh.ParseAuthorizedKey([]byte(s))
+			if err != nil {
+				return "", false
+			}
+			cryptoKey, ok := out.(ssh.CryptoPublicKey)
+			if !ok {
+				return "", false
+			}
+			rsaKey, ok := cryptoKey.CryptoPublicKey().(*rsa.PublicKey)
+			if !ok {
+				return "", false
+			}
+			return t, rsaKey.N.BitLen() < 2048
+		default:
+			return t, true
+		}
 	}
 	return "", false
 }
@@ -155,14 +180,16 @@ func parseIdentitiesFile(name string) ([]age.Identity, error) {
 	}
 
 	b := bufio.NewReader(f)
-	p, _ := b.Peek(14) // length of "age-encryption" and "-----BEGIN AGE"
-	peeked := string(p)
+	const maxWhitespace = 1024
+	p, _ := b.Peek(maxWhitespace + len(armor.Header))
+	trimmed := bytes.TrimSpace(p)
 
 	switch {
 	// An age encrypted file, plain or armored.
-	case peeked == "age-encryption" || peeked == "-----BEGIN AGE":
+	case bytes.HasPrefix(p, []byte("age-encryption")) ||
+		bytes.HasPrefix(trimmed, []byte(armor.Header)):
 		var r io.Reader = b
-		if peeked == "-----BEGIN AGE" {
+		if bytes.HasPrefix(trimmed, []byte(armor.Header)) {
 			r = armor.NewReader(r)
 		}
 		const privateKeySizeLimit = 1 << 24 // 16 MiB
@@ -188,7 +215,7 @@ func parseIdentitiesFile(name string) ([]age.Identity, error) {
 		}}, nil
 
 	// Another PEM file, possibly an SSH private key.
-	case strings.HasPrefix(peeked, "-----BEGIN"):
+	case bytes.HasPrefix(trimmed, []byte("-----BEGIN")):
 		const privateKeySizeLimit = 1 << 14 // 16 KiB
 		contents, err := io.ReadAll(io.LimitReader(b, privateKeySizeLimit))
 		if err != nil {
@@ -226,7 +253,8 @@ func parseIdentity(s string) (age.Identity, error) {
 func parseIdentities(f io.Reader) ([]age.Identity, error) {
 	const privateKeySizeLimit = 1 << 24 // 16 MiB
 	var ids []age.Identity
-	scanner := bufio.NewScanner(io.LimitReader(f, privateKeySizeLimit))
+	lr := &io.LimitedReader{R: f, N: privateKeySizeLimit + 1}
+	scanner := bufio.NewScanner(lr)
 	var n int
 	for scanner.Scan() {
 		n++
@@ -248,6 +276,9 @@ func parseIdentities(f io.Reader) ([]age.Identity, error) {
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("failed to read identities file: %v", err)
+	}
+	if lr.N == 0 {
+		return nil, fmt.Errorf("identities file is too long")
 	}
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("no identities found")
